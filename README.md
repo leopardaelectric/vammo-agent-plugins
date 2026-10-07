@@ -44,6 +44,15 @@ An Owner adds this to **claude.ai → Organization settings → Claude Code → 
 
 Each person still authenticates once with `/mcp`.
 
+### Claude chat on the web and desktop (Claude Team or Enterprise)
+
+Organization marketplaces on claude.ai cannot sync from a public repository, so the plugin is uploaded as a ZIP whose root holds `.claude-plugin/plugin.json` (build it with forward-slash paths; PowerShell's `Compress-Archive` writes backslashes).
+
+1. **Organization settings → Connectors**: the Vammo Work Tracker connector with URL `https://services.vammo.com/ms-work-tracker/mcp`.
+2. **Organization settings → Plugins & skills → Add → Upload**: the ZIP, availability **Installed by default**.
+
+In chat, the skill and the connector load; the session-start hook does not run there. Skills need code execution enabled. The claude.ai plugin also syncs into Claude Code as `vammo-work-tracker@synced`; a marketplace-installed copy takes precedence, so it is not loaded twice. After changing the plugin, upload the new ZIP in each organization with **Upload new version**.
+
 ### Moving from a manual setup
 
 If you added the server by hand or copied the skill, remove them so tools are not duplicated:
