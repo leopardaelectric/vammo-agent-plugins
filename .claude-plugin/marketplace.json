@@ -1,0 +1,13 @@
+{
+  "name": "vammo",
+  "description": "Vammo plugins for Claude Code and Codex.",
+  "owner": { "name": "Vammo" },
+  "plugins": [
+    {
+      "name": "vammo-work-tracker",
+      "source": "./plugins/vammo-work-tracker",
+      "description": "Vammo Work Tracker MCP server plus the work-tracking skill and a session-start reminder.",
+      "version": "1.0.0"
+    }
+  ]
+}
