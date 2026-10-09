@@ -26,9 +26,9 @@ below it, a line starting with `!` excludes it, `#` starts a comment, and the lo
 wins. Paths compare without case; `C:\vammo` and `C:/vammo` are the same.
 
 - Without the file, every folder is tracked.
-- With the file, track only when the working directory matches a tracked line. In Claude Code the
-  session-start reminder already says whether tracking is off for the folder; in Codex, read the
-  file yourself.
+- With the file, track only when the working directory matches a tracked line. The session-start
+  reminder (Claude Code and Codex) already says whether tracking is off for the folder; if there
+  was no reminder, read the file yourself.
 - Out of scope, do not call any tracking tool unless the person explicitly asks to track this work.
   Then track that task only.
 - When the person asks to track a folder or project from now on, add its absolute path as a line

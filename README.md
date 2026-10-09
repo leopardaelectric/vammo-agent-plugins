@@ -7,7 +7,7 @@ Plugins that connect Claude Code and Codex to Vammo systems. The repository is p
 The plugin installs:
 - the remote MCP server of the [Vammo Work Tracker](https://work.vammo.com) (`https://services.vammo.com/ms-work-tracker/mcp`, Vammo sign-in);
 - the `vammo-work-tracking` skill, which tracks every coding task: work item, session, progress, and the branch, commits and pull requests behind it;
-- in Claude Code, a session-start reminder so tracking happens without being asked, only in the folders you choose (see [Tracking only work folders](#tracking-only-work-folders)).
+- in Claude Code and Codex, a session-start reminder so tracking happens without being asked, only in the folders you choose (see [Tracking only work folders](#tracking-only-work-folders)).
 
 ### Claude Code
 
@@ -64,7 +64,7 @@ C:\vammo
 !C:\vammo\personal
 ```
 
-A folder line covers everything below it, `!` excludes, `#` is a comment and the longest matching line wins. Once the file exists, folders that match no line are not tracked, unless you ask the agent to track that task. You can also ask the agent to track or stop tracking a folder from now on; it edits the file. Set `VAMMO_TRACKED_FOLDERS` to use another file. In Claude Code the scope applies when the session starts.
+A folder line covers everything below it, `!` excludes, `#` is a comment and the longest matching line wins. Once the file exists, folders that match no line are not tracked, unless you ask the agent to track that task. You can also ask the agent to track or stop tracking a folder from now on; it edits the file. Set `VAMMO_TRACKED_FOLDERS` to use another file. The scope applies when a Claude Code or Codex session starts. Codex asks you to trust the plugin hook again after each plugin update that changes it.
 
 ### Moving from a manual setup
 
