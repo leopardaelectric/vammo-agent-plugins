@@ -2,7 +2,10 @@
   "mcpServers": {
     "vammo": {
       "type": "http",
-      "url": "https://services.vammo.com/ms-work-tracker/mcp"
+      "url": "https://services.vammo.com/ms-work-tracker/mcp",
+      "headers": {
+        "X-Vammo-Plugin": "vammo-work-tracker@1.1.0"
+      }
     }
   }
 }

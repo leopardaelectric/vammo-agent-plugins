@@ -1,7 +1,7 @@
 {
   "name": "vammo-work-tracker",
   "displayName": "Vammo Work Tracker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Connects Claude Code and Codex to the Vammo Work Tracker (remote MCP with Vammo sign-in) and tracks every coding task: work item, session, progress, and the branch, commits and pull requests behind it.",
   "author": {
     "name": "Vammo"
