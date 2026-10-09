@@ -7,7 +7,7 @@
       "name": "vammo-work-tracker",
       "source": "./plugins/vammo-work-tracker",
       "description": "Vammo Work Tracker MCP server plus the work-tracking skill and a session-start reminder.",
-      "version": "1.1.0"
+      "version": "1.2.0"
     }
   ]
 }

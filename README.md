@@ -7,7 +7,7 @@ Plugins that connect Claude Code and Codex to Vammo systems. The repository is p
 The plugin installs:
 - the remote MCP server of the [Vammo Work Tracker](https://work.vammo.com) (`https://services.vammo.com/ms-work-tracker/mcp`, Vammo sign-in);
 - the `vammo-work-tracking` skill, which tracks every coding task: work item, session, progress, and the branch, commits and pull requests behind it;
-- in Claude Code, a session-start reminder so tracking happens without being asked.
+- in Claude Code, a session-start reminder so tracking happens without being asked, only in the folders you choose (see [Tracking only work folders](#tracking-only-work-folders)).
 
 ### Claude Code
 
@@ -52,6 +52,19 @@ Organization marketplaces on claude.ai cannot sync from a public repository, so 
 2. **Organization settings → Plugins & skills → Add → Upload**: the ZIP, availability **Installed by default**.
 
 In chat, the skill and the connector load; the session-start hook does not run there. Skills need code execution enabled. The claude.ai plugin also syncs into Claude Code as `vammo-work-tracker@synced`; a marketplace-installed copy takes precedence, so it is not loaded twice. After changing the plugin, upload the new ZIP in each organization with **Upload new version**.
+
+### Tracking only work folders
+
+By default every coding task is tracked. To track only company work, create `~/.vammo/tracked-folders` (on Windows `%USERPROFILE%\.vammo\tracked-folders`) with one folder per line:
+
+```text
+# Track everything under C:\vammo
+C:\vammo
+# except this folder
+!C:\vammo\personal
+```
+
+A folder line covers everything below it, `!` excludes, `#` is a comment and the longest matching line wins. Once the file exists, folders that match no line are not tracked, unless you ask the agent to track that task. You can also ask the agent to track or stop tracking a folder from now on; it edits the file. Set `VAMMO_TRACKED_FOLDERS` to use another file. In Claude Code the scope applies when the session starts.
 
 ### Moving from a manual setup
 

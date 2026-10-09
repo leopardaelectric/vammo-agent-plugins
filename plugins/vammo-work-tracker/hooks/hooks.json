@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'Vammo Work Tracker is connected (MCP server vammo). For any coding task, follow the vammo-work-tracking skill: get_context, then ensure_work_item and start_work_session, link_code after each push or pull request, record_progress at milestones and finish_work_session at the end. If a vammo tool reports that sign-in is needed, ask the person to run /mcp and choose Authenticate for vammo.'"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh\""
           }
         ]
       }
