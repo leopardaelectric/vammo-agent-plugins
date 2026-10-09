@@ -1,13 +1,24 @@
 {
   "name": "vammo",
   "description": "Vammo plugins for Claude Code and Codex.",
-  "owner": { "name": "Vammo" },
+  "owner": {
+    "name": "Vammo"
+  },
   "plugins": [
     {
       "name": "vammo-work-tracker",
       "source": "./plugins/vammo-work-tracker",
       "description": "Vammo Work Tracker MCP server plus the work-tracking skill and a session-start reminder.",
       "version": "1.2.0"
+    },
+    {
+      "name": "vammo-claude-skills",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/leopardaelectric/vammo-claude-skills.git"
+      },
+      "description": "Shared Claude Code skills, commands and agents for the Vammo engineering team: local-dev-cycle, dev-qa-live-tests, deployment-agent and the agents behind them.",
+      "category": "team-tooling"
     }
   ]
 }
