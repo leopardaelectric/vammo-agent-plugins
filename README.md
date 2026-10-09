@@ -62,6 +62,8 @@ If you added the server by hand or copied the skill, remove them so tools are no
 
 ## Changing a plugin
 
+The plugin's `.mcp.json` sends `X-Vammo-Plugin: vammo-work-tracker@<version>` so the work tracker can show administrators who connected through the plugin. Claude Code reads `headers` and Codex reads `http_headers`; keep both, with the plugin version.
+
 Bump `version` in the plugin's `.claude-plugin/plugin.json` and in `.claude-plugin/marketplace.json`, so clients pick up the update. Check with:
 
 ```bash
