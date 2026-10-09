@@ -83,3 +83,14 @@ Bump `version` in the plugin's `.claude-plugin/plugin.json` and in `.claude-plug
 claude plugin validate ./plugins/vammo-work-tracker
 claude plugin validate .
 ```
+
+## vammo-claude-skills
+
+Shared Claude Code skills, commands and agents for the engineering team: `local-dev-cycle` (a feature from ticket to PR through specialized agents), `dev-qa-live-tests` (live QA of a branch on the docker stack or on dev) and `deployment-agent` (`/track-deploy`). Source and docs: [leopardaelectric/vammo-claude-skills](https://github.com/leopardaelectric/vammo-claude-skills) (private: the install needs read access to the `leopardaelectric` organization on GitHub).
+
+```bash
+claude plugin marketplace add leopardaelectric/vammo-agent-plugins
+claude plugin install vammo-claude-skills@vammo
+```
+
+Restart Claude Code. The skills appear as `/vammo-claude-skills:<name>`; the agents as `vammo-claude-skills:<name>`. Claude Code only.
