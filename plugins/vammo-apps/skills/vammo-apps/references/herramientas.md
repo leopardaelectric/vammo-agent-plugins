@@ -9,6 +9,7 @@ idioma de la persona) y `next_steps` (qué hacer después). `ambiente` es
 | Herramienta | Para qué |
 |---|---|
 | `vammo_guia` | La guía (`tema: guia`), las reglas técnicas (`reglas`) o las plantillas (`plantillas`). |
+| `vammo_conocimiento` | La base de conocimiento viva de la empresa: `accion` `listar` (índice, "siempre leer" primero), `buscar` (`q`) o `leer` (`slug`: el artículo con versión y fecha). Consultala antes de diseñar. |
 | `vammo_novedades` | Lo que pasó desde la última vez: deploys listos o fallidos, pedidos aprobados/cerrados/comentados, cronjobs que fallaron, secretos cargados. Marca como leídas. |
 | `vammo_mis_apps` | Las apps de la persona con URLs, último deploy y si esperan aprobación. |
 | `vammo_datasets` | Catálogo de datos (`filtro`): sensibilidad, si requiere aprobación, columnas, filtrables y personales. |

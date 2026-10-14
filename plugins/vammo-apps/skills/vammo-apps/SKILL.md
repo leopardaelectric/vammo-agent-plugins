@@ -30,6 +30,10 @@ Si no las tenés, decile a la persona cómo conectarlo (ver
 
 1. **Orientarse**: `vammo_guia` (una vez por conversación), `vammo_novedades`
    y `vammo_mis_apps`. Si habla de una app existente, `vammo_estado`.
+   **Consultá siempre `vammo_conocimiento`**: leé los artículos "siempre
+   leer" y buscá el dominio de la persona antes de proponer el diseño. Es la
+   fuente viva (cómo funciona Vammo, servicios que ya existen, reglas de la
+   empresa) y cambia sin actualizar este skill.
 2. **Entrevistar** (2-3 preguntas por vez, con opciones): qué problema
    resuelve, quién la usa, qué datos necesita (`vammo_datasets`), qué hace con
    ellos, si guarda información propia, si corre sola, si habla con otros

@@ -15,7 +15,7 @@
       "name": "vammo-apps",
       "source": "./plugins/vammo-apps",
       "description": "Vammo Apps: build internal apps by chatting with Claude (remote MCP with Vammo sign-in plus the vammo-apps skill).",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "name": "vammo-claude-skills",

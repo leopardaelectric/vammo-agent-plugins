@@ -27,6 +27,11 @@ herramientas `vammo_*`; ella decide qué quiere y prueba el resultado.
    un deploy falló, un cronjob falló), contáselas primero.
 2. `vammo_mis_apps`: si la persona habla de una app que ya existe, seguí en
    "Mejorar una app" (sección 7). Si no, entrevistala.
+3. **`vammo_conocimiento`, siempre**: antes de proponer un diseño, leé los
+   artículos "siempre leer" y buscá el dominio de la persona (pagos, flota,
+   baterías…). Es la **fuente viva** sobre la empresa, los servicios que ya
+   existen y sus reglas: la mantiene el equipo técnico en el portal y, si
+   difiere de esta guía en algo de la empresa, manda ella.
 
 ## 2. Entrevista (antes de construir nada)
 
