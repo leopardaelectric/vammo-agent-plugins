@@ -55,6 +55,7 @@ idioma de la persona) y `next_steps` (qué hacer después). `ambiente` es
 | `vammo_pedir_acceso` | Pide `dataset`, `pii`, `egress`, `secreto`, `recursos`, `tier_datos`, `acceso`, `email` (`interno` / `externo`), `ai` (`si` / `pii`) o `slack` (nombre de un canal registrado) con una `justificacion` para el revisor. Si no necesita aprobación, se aplica solo. |
 | `vammo_secretos` | `listar` (nombres declarados y cargados) o `pedir_carga` (link de un solo uso para cargar valores en el navegador). |
 | `vammo_miembros` | `listar`, `agregar` o `quitar` personas que pueden modificar la app (solo el dueño). |
+| `vammo_roles_app` | Roles DENTRO de la app (vammo.yaml → `roles`): `listar`, `asignar` o `quitar` un rol a un email o a `grupo:<nombre>`, por `ambiente` (prod por defecto). El código chequea con `user.can("permiso")`. |
 
 ## Prompts y recursos
 

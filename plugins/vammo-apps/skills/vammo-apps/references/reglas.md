@@ -15,8 +15,9 @@ La plataforma **chequea cada cambio y rechaza** lo que no cumpla estas reglas
    declarado en `vammo.yaml` → `secrets`. El valor lo carga la persona con
    el link de `vammo_secretos`. Nunca escribas un valor en un archivo.
 3. **Login**: no lo implementes. La identidad llega validada en `user`.
-   Roles propios de la app sí (ej. una tabla `admins` en `db` con los
-   `user.email` que pueden editar).
+   Los roles dentro de la app (quién edita, quién solo mira) se declaran en
+   `vammo.yaml` → `roles` y se chequean con `user.can("permiso")`: no armes
+   tablas propias de usuarios o roles en `db`.
 4. **Internet**: las apps no tienen. Un host externo se declara en
    `vammo.yaml` → `egress` (solo el host) y requiere aprobación.
 5. **Solo el SDK `vammo`** para hablar con la plataforma, y librerías
@@ -44,6 +45,11 @@ egress: []                   # hosts externos (ej. api.ejemplo.com), con aprobac
 resources:
   tier: small                # small | medium (medium con aprobación)
 access: [todos]              # todos, emails o grupo:<nombre>
+roles:                       # roles DENTRO de la app (opcional, se aprueba solo)
+  admin: [ver_costos, editar, administrar]
+  editor: [editar]
+  lector: []
+default_role: lector         # rol de quien no tiene uno asignado
 # schedule: "0 7 * * *"      # cronjob: cron en hora de la empresa (America/Sao_Paulo)
 ```
 
@@ -52,6 +58,13 @@ access: [todos]              # todos, emails o grupo:<nombre>
 - `access`: además del dueño y el equipo técnico, que entran siempre. Si no
   está: todos, **salvo que la app lea datos sensibles** (ahí solo dueño y
   equipo técnico hasta declararlo; abrirla a más gente pide aprobación).
+- `roles`: cada rol con sus permisos (o solo nombres: `roles: [admin,
+  lector]`). Nombres en minúsculas (`a-z0-9_-`); permisos `a-z0-9_`. `admin`
+  existe siempre: tiene todos los permisos declarados más `administrar`
+  (manejar los roles), que es solo suyo. El dueño y los miembros son `admin`
+  siempre. `default_role` no puede ser `admin`. Las asignaciones (a un email
+  o a `grupo:<nombre>`) son por ambiente y se hacen con `vammo_roles_app`,
+  en el portal o desde la app con `app_users`.
 - `web: { spa: true }` (webapp/frontend): las rutas que no son archivos
   devuelven `index.html`. En una webapp es el default.
 - `backend: <api>` (solo frontend estático): el proyecto `api` que atiende
@@ -92,7 +105,12 @@ db.query("SELECT ... WHERE id = %s", valor)      # leer tu base (parámetros %s;
 db.execute("INSERT/UPDATE ...", *params)         # escribir tu base
 with db.transaction() as tx: tx.execute(...)     # varias escrituras: todo o nada
 user.id / user.email / user.name / user.region   # identidad validada (del directorio de la empresa)
-user.has_permission("ver_costos")
+user.has_permission("ver_costos")                 # permiso de la PLATAFORMA (directorio)
+user.groups / user.in_group("finanzas")           # grupos del directorio de la empresa
+user.role / user.roles / user.has_role("editor")  # roles DENTRO de esta app (vammo.yaml → roles)
+user.can("editar")                                # permiso DENTRO de esta app
+app_users.list() / app_users.assign("ana@vammo.com", "editor") / app_users.remove("grupo:finanzas")
+                                                  # administrar roles desde la app (solo con `administrar`)
 secrets.get("NOMBRE")
 cache.get(k) / cache.set(k, v, ttl=seg) / cache.delete(k)   # una caché para toda la app
 log.info(msg, **campos) / log.debug / log.warn / log.error
@@ -109,7 +127,8 @@ notify.slack("ventas-alertas", "Reporte listo", blocks=None)   # Slack (slack: [
 ```
 
 Node: `import { data, db, user, secrets, cache, log, files, email, ai, notify } from "@vammo/sdk"`
-(mismas primitivas, con `await`; `user.hasPermission`, `files.uploadUrl`,
+(mismas primitivas, con `await`; `user.hasPermission`, `user.inGroup`,
+`user.hasRole`, `user.can`, `appUsers.assign`, `files.uploadUrl`,
 `email.send({ to, subject, text, html, replyTo, attachments })`,
 `ai.complete({ prompt, system, model, maxTokens, jsonSchema })` → `{ text, json, … }`,
 `ai.text(prompt)`, `ai.classify`, `ai.extract`, `notify.slack(canal, texto, { blocks })`). En
@@ -147,7 +166,17 @@ for pagina in data.pages("<dataset>", order_by=["fecha"], limit=5000):  # todo, 
 **Identidad**: región y permisos salen del directorio de la empresa.
 `user.has_permission("x")` es verdadero solo si el directorio le da ese
 permiso exacto (en un cronjob no hay persona). No inventes nombres de
-permisos ni regiones: preguntá; uno nuevo se le pide al equipo técnico.
+permisos, grupos ni regiones: preguntá; uno nuevo se le pide al equipo
+técnico (los administra en el portal).
+
+**Roles de la app**: `user.can("editar")` es verdadero si alguno de los
+roles de la persona en ESTA app (y en este ambiente) da ese permiso; en un
+cronjob, siempre falso. Chequealo en el servidor (el endpoint que guarda o
+borra), no solo para mostrar u ocultar un botón. Un permiso que no está en
+ningún rol de `vammo.yaml` da un aviso al deployar (siempre sería falso).
+Para una pantalla "Administrar usuarios": mostrala solo si
+`user.can("administrar")` y usá `app_users` (en un dashboard, si la sesión
+venció, `AppUsersError` con status 401: pedí recargar la página).
 
 **FastAPI**: endpoints con `def`, no `async def` (el SDK bloquea; en un
 `async def` frena a todos los pedidos). Si hace falta `async def`, usá

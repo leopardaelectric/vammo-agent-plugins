@@ -27,16 +27,16 @@ herramientas `vammo_*`; ella decide qué quiere y prueba el resultado.
    un deploy falló, un cronjob falló), contáselas primero.
 2. `vammo_mis_apps`: si la persona habla de una app que ya existe, seguí en
    "Mejorar una app" (sección 7). Si no, entrevistala.
-3. Si la persona ya tiene la app hecha en otro lado ("migrá esta app a
-   Vammo Apps", una carpeta con código, algo que corre en otro servidor),
-   leé la guía de migración (`vammo_guia` con `tema: "migrar"`) y seguila:
-   primero un plan que la persona confirma, nunca cambios sobre su carpeta
-   original.
-4. **`vammo_conocimiento`, siempre**: antes de proponer un diseño, leé los
+3. **`vammo_conocimiento`, siempre**: antes de proponer un diseño, leé los
    artículos "siempre leer" y buscá el dominio de la persona (pagos, flota,
    baterías…). Es la **fuente viva** sobre la empresa, los servicios que ya
    existen y sus reglas: la mantiene el equipo técnico en el portal y, si
    difiere de esta guía en algo de la empresa, manda ella.
+4. Si la persona ya tiene la app hecha en otro lado ("migrá esta app a
+   Vammo Apps", una carpeta con código, algo que corre en otro servidor),
+   leé la guía de migración (`vammo_guia` con `tema: "migrar"`) y seguila:
+   primero un plan que la persona confirma, nunca cambios sobre su carpeta
+   original.
 
 ## 2. Entrevista (antes de construir nada)
 
@@ -46,21 +46,25 @@ Lo que necesitás saber:
 1. **Qué problema resuelve** y qué hace hoy la persona a mano.
 2. **Quién la va a usar**: solo ella, su equipo (`grupo:<nombre>`), personas
    puntuales (emails) o toda la empresa (`todos`).
-3. **Qué datos de la empresa necesita leer**: buscá en `vammo_datasets` y
+3. **Quién puede ver o hacer qué adentro**: ¿todos los que la abren pueden
+   hacer todo, o hay quien solo mira y quien edita, aprueba o ve costos? Si
+   hay diferencias, proponé roles (ej. admin, editor, lector) con sus
+   permisos (ver "Roles dentro de la app", sección 5).
+4. **Qué datos de la empresa necesita leer**: buscá en `vammo_datasets` y
    proponé los que sirven, en sus palabras ("los viajes de cada bici", "los
    pagos"). Si hay datos personales (emails, documentos, teléfonos) explicá
    que vienen ocultos y que pedirlos requiere aprobación: ¿los necesita de
    verdad o alcanza sin ellos?
-4. **Qué hace con esos datos**: pantallas, tablas, gráficos, formularios,
+5. **Qué hace con esos datos**: pantallas, tablas, gráficos, formularios,
    filtros, exportar, subir fotos o PDFs.
-5. **Si guarda información propia** (registros, estados, comentarios): va en
+6. **Si guarda información propia** (registros, estados, comentarios): va en
    su propia base.
-6. **Si corre sola** (todos los días, cada hora) o la abre una persona.
-7. **Si habla con otro sistema** (una API externa): eso requiere un host
+7. **Si corre sola** (todos los días, cada hora) o la abre una persona.
+8. **Si habla con otro sistema** (una API externa): eso requiere un host
    aprobado y, casi siempre, un secreto (token) que la persona carga por un
    link seguro. Para **avisar por Slack** no hace falta nada de eso: la
    plataforma tiene canales registrados por nombre (sección 5).
-8. **Si necesita "inteligencia"**: resumir textos, clasificar reclamos,
+9. **Si necesita "inteligencia"**: resumir textos, clasificar reclamos,
    sacar datos de un mail o un PDF, redactar. La app puede usar la IA de la
    plataforma (sección 5) sin claves propias.
 
@@ -72,7 +76,8 @@ Resumí en lenguaje simple, en una lista corta:
 - Qué tipo de app es (ver tabla) — casi siempre **webapp**.
 - Las pantallas y qué se puede hacer en cada una.
 - Qué datos lee y qué guarda.
-- Quién la puede abrir.
+- Quién la puede abrir y, si hace falta, los roles de adentro (quién ve o
+  hace qué) y a quién le das cada uno.
 - **Qué necesita aprobación del equipo técnico y por qué** (datos sensibles
   o personales, hosts externos, secretos nuevos, más recursos), y que
   mientras tanto podés avanzar con el resto.
@@ -182,6 +187,33 @@ registrado"). Si queda esperando, nombrá a los `revisores`.
   `vammo_novedades` avisa cuando se aprueban o piden cambios. Si piden
   cambios, hacelos y volvé a escribir (el pedido nuevo reemplaza al viejo).
 - Lo aprobado para dev no se vuelve a pedir para prod (y al revés).
+
+### Roles dentro de la app (quién ve o hace qué adentro)
+
+`access` decide quién puede ABRIR la app. Para restringir cosas ADENTRO
+(editar, aprobar, ver costos, administrar usuarios) declará roles en
+`vammo.yaml` y chequealos en el código. No necesita aprobación.
+
+```yaml
+roles:
+  admin: [ver_costos, editar, administrar]
+  editor: [editar]
+  lector: []
+default_role: lector      # quien no tiene un rol asignado
+```
+
+- El dueño y los miembros de la app son `admin` siempre; `admin` tiene todos
+  los permisos declarados más `administrar` (manejar los roles).
+- En el código: `if user.can("editar"):` / `user.has_role("editor")` /
+  `user.role` (Python) o `user.can("editar")` / `user.hasRole(...)` (Node).
+  Mostrá u ocultá botones con eso **y** chequealo también en el endpoint que
+  hace el cambio (la API), no solo en la pantalla.
+- Asignar roles: `vammo_roles_app` (accion `asignar`, a un email o a
+  `grupo:<nombre>`, por ambiente: prod y dev son separados), el portal
+  (pestaña "Roles de la app") o la propia app con una pantalla
+  "Administrar usuarios" usando `app_users.list()`, `app_users.assign(...)`
+  y `app_users.remove(...)` (solo funciona para quien tiene `administrar`).
+- Confirmá con la persona antes de asignar o quitar roles.
 
 ## 6. Secretos (tokens, claves de APIs externas)
 
