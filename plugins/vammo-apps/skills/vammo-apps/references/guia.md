@@ -27,7 +27,12 @@ herramientas `vammo_*`; ella decide qué quiere y prueba el resultado.
    un deploy falló, un cronjob falló), contáselas primero.
 2. `vammo_mis_apps`: si la persona habla de una app que ya existe, seguí en
    "Mejorar una app" (sección 7). Si no, entrevistala.
-3. **`vammo_conocimiento`, siempre**: antes de proponer un diseño, leé los
+3. Si la persona ya tiene la app hecha en otro lado ("migrá esta app a
+   Vammo Apps", una carpeta con código, algo que corre en otro servidor),
+   leé la guía de migración (`vammo_guia` con `tema: "migrar"`) y seguila:
+   primero un plan que la persona confirma, nunca cambios sobre su carpeta
+   original.
+4. **`vammo_conocimiento`, siempre**: antes de proponer un diseño, leé los
    artículos "siempre leer" y buscá el dominio de la persona (pagos, flota,
    baterías…). Es la **fuente viva** sobre la empresa, los servicios que ya
    existen y sus reglas: la mantiene el equipo técnico en el portal y, si
@@ -51,9 +56,13 @@ Lo que necesitás saber:
 5. **Si guarda información propia** (registros, estados, comentarios): va en
    su propia base.
 6. **Si corre sola** (todos los días, cada hora) o la abre una persona.
-7. **Si habla con otro sistema** (Slack, una API externa): eso requiere un
-   host aprobado y, casi siempre, un secreto (token) que la persona carga
-   por un link seguro.
+7. **Si habla con otro sistema** (una API externa): eso requiere un host
+   aprobado y, casi siempre, un secreto (token) que la persona carga por un
+   link seguro. Para **avisar por Slack** no hace falta nada de eso: la
+   plataforma tiene canales registrados por nombre (sección 5).
+8. **Si necesita "inteligencia"**: resumir textos, clasificar reclamos,
+   sacar datos de un mail o un PDF, redactar. La app puede usar la IA de la
+   plataforma (sección 5) sin claves propias.
 
 ## 3. Proponé el diseño y pedí confirmación
 
@@ -107,26 +116,68 @@ Esperá un "sí" antes de crear la app.
 5. Seguí el deploy con `vammo_progreso_deploy` (espera sola unos segundos
    por llamada). Contale a la persona en qué etapa va. Si falla, te da la
    causa, el final del log y una sugerencia: arreglalo y volvé a escribir.
-6. Cuando esté listo, pasale la **URL de dev** y pedile que la pruebe.
+6. Cuando esté listo, mirá la página con `vammo_captura` (una imagen, los
+   errores de la consola y lo que no cargó): si hay errores, corregilos
+   antes. Después pasale la **URL de dev** y pedile que la pruebe.
    Preguntale qué cambiarías. Iterá.
 7. Mantené `NOTAS.md` al día (decisiones, pendientes, qué pidió la persona).
 
 ## 5. Permisos y aprobaciones
 
-Necesitan aprobación del equipo técnico: datasets `confidential` o
-`restricted`, columnas personales (`pii`), tier de datos `standard` o
-`elevated`, recursos `medium`, secretos nuevos, hosts externos (`egress`)
-nuevos y dependencias fuera de la lista aprobada. Todo lo demás se aprueba
-solo.
+Cuenta como **sensible** (necesita aprobación): datasets `confidential` o
+`restricted`, columnas personales (`pii`: email, documento, teléfono…), tier
+de datos `standard` o `elevated`, recursos `medium`, secretos nuevos, hosts
+externos (`egress`) nuevos, dependencias fuera de la lista aprobada, abrir a
+más gente una app que muestra datos sensibles, mandar mails fuera de la
+empresa (`email.external`) y mandarle datos personales a la IA (`ai.pii`).
+Todo lo demás se aprueba solo (por ejemplo mandar mails a la empresa:
+`email: true`; usar la IA sin datos personales: `ai: true`; avisar a un
+canal de Slack registrado: `slack: [canal]`).
+
+Quién aprueba depende del **rol** de la persona (lo asigna un admin en el
+portal):
+
+- **Admin**: todo lo suyo se publica directo, aunque sea sensible (queda
+  registrado). Aprueba los pedidos de cualquiera.
+- **Developer**: lo suyo se publica directo salvo lo más delicado (datasets
+  `restricted`, columnas personales, tier `elevated`, abrir una app sensible
+  a más gente, mails fuera de la empresa): eso lo aprueba otra persona.
+  Aprueba los pedidos de usuarios y de otros developers, nunca los propios.
+- **Usuario** (el resto): todo lo sensible lo aprueba un developer o un admin.
+
+Si la respuesta trae `aprobado_por_rol`, se publicó directo por el rol:
+decíselo ("lo publiqué directo porque sos admin/developer; quedó
+registrado"). Si queda esperando, nombrá a los `revisores`.
+
+- **Mails**: si la app tiene que avisar o mandar reportes por mail, usá el
+  SDK `email` (nunca SMTP ni una API de mail con un secreto). Declaralo con
+  `vammo_pedir_acceso` tipo=`email`: valor `interno` (solo a la empresa, se
+  aprueba solo) o `externo` (clientes, proveedores: con revisión y
+  justificación de a quién y por qué). En dev solo reciben el dueño y los
+  miembros: para probar, que la persona se lo mande a sí misma.
+
+- **IA** (resumir, clasificar, extraer datos de un texto, redactar): usá el
+  SDK `ai` (nunca una API de IA con una clave propia). Pedilo con
+  `vammo_pedir_acceso` tipo=`ai` valor=`si` (se aprueba solo). Si la app le
+  va a mandar **datos personales** (nombres, emails, documentos de
+  clientes), valor=`pii`: pasa por revisión. Cada app tiene una cuota
+  diaria de tokens; la plataforma no guarda los textos.
+
+- **Slack**: para avisos a un canal, `notify.slack("<canal>", texto)`. Los
+  canales los registra un admin de la plataforma con un nombre (ej.
+  `ventas-alertas`); pedilo con `vammo_pedir_acceso` tipo=`slack` y el
+  nombre (si no existe, te dice cuáles hay: si hace falta uno nuevo, la
+  persona se lo pide a un admin). Nunca pongas la URL de un webhook en el
+  código ni la pidas por el chat.
 
 - Usá `vammo_pedir_acceso` con una **justificación para el revisor**: qué
   hace la app, para quién, por qué necesita exactamente eso y por qué no
   alcanza con menos. Pedí lo mínimo.
 - Devuelve el link del pedido y quiénes lo revisan (ya les avisamos).
   Explicale a la persona qué se pidió, quién lo mira (suele ser en el día) y
-  que cuando lo aprueben se deploya solo. Nadie aprueba lo propio: si la
-  persona es revisora, lo tiene que aprobar otro. Mientras tanto seguí con lo
-  que no depende de eso.
+  que cuando lo aprueben se deploya solo. Nadie aprueba lo propio (salvo un
+  admin): si la persona es developer, lo tiene que aprobar otro. Mientras
+  tanto seguí con lo que no depende de eso.
 - `vammo_estado` muestra los pedidos abiertos y los comentarios del revisor;
   `vammo_novedades` avisa cuando se aprueban o piden cambios. Si piden
   cambios, hacelos y volvé a escribir (el pedido nuevo reemplaza al viejo).
@@ -143,6 +194,18 @@ solo.
   para que la persona cargue el valor en el navegador. Pasáselo y esperá a
   que te diga que lo cargó (`vammo_secretos` con `accion: "listar"` muestra
   qué nombres tienen valor).
+
+## 6 bis. Datos propios de la app (su base)
+
+- Para cargar datos que la persona ya tiene (una planilla, un CSV, un JSON
+  o un dump de Postgres de la app vieja) usá `vammo_importar_datos`: da un
+  link de un solo uso y el comando para subir el archivo (desde la
+  terminal de Claude Code lo corrés vos; si no, la persona). Crea la tabla
+  desde los encabezados si no existe. Es dev por defecto; en prod solo
+  después de que la persona lo confirme.
+- Para ver qué guardó la app (o verificar una importación) usá
+  `vammo_consultar_base` con un SELECT. Son datos de la app y pueden ser
+  personales: mostrá solo lo necesario.
 
 ## 7. Mejorar una app que ya existe
 
@@ -167,6 +230,9 @@ solo.
 - `vammo_estado`: último deploy de cada ambiente, el error y pedidos abiertos.
 - `vammo_progreso_deploy`: etapa en la que falló, causa, final del log y
   sugerencia.
+- `vammo_captura`: cómo se ve una página, errores de la consola del
+  navegador y recursos que no cargan.
+- `vammo_consultar_base`: qué hay en la base de la app.
 - `vammo_logs` (con `buscar`, `nivel`, `desde`): errores de la app ya
   corriendo. Para un cronjob, las últimas corridas con su salida;
   `vammo_ejecutar` lo corre ahora.

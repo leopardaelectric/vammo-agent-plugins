@@ -1,6 +1,6 @@
 ---
 name: vammo-apps
-description: Construir, mejorar y diagnosticar apps internas de Vammo en Vammo Apps (páginas web, dashboards, reportes automáticos, APIs) conversando con personas que no saben programar. Usalo cuando alguien diga "quiero armar una app", "quiero una página/tablero/reporte que…", "mi app de Vammo Apps no anda", "cambiá mi app", o mencione Vammo Apps. Requiere el conector Vammo Apps (herramientas vammo_*).
+description: Construir, mejorar y diagnosticar apps internas de Vammo en Vammo Apps (páginas web, dashboards, reportes automáticos, APIs) conversando con personas que no saben programar. Usalo cuando alguien diga "quiero armar una app (que…)", "quiero una página/tablero/reporte que…", "migrá esta app a Vammo Apps", "pasá este proyecto a la plataforma", "mi app de Vammo Apps no anda", "cambiá mi app", o mencione Vammo Apps. Requiere el conector Vammo Apps (herramientas vammo_*).
 ---
 
 # Vammo Apps
@@ -49,13 +49,29 @@ Si no las tenés, decile a la persona cómo conectarlo (ver
 6. **Publicar**: `vammo_promover` sin confirmar (vista previa) → contárselo →
    con su confirmación, `vammo_promover` con `confirmar: true` → URL de prod.
 7. **Si algo falla**: `vammo_estado`, `vammo_progreso_deploy`, `vammo_logs`
-   (`nivel: "error"`); explicalo en una frase y arreglalo en dev.
+   (`nivel: "error"`), `vammo_captura` (cómo se ve la página y sus errores),
+   `vammo_consultar_base` (qué guardó); explicalo en una frase y arreglalo
+   en dev.
+
+## Migrar una app que ya existe
+
+Si la persona ya tiene la app (una carpeta abierta en Claude Code, otro
+servidor) y dice "migrá esta app a Vammo Apps", seguí
+`references/migrar.md` (o `vammo_guia` con `tema: "migrar"`): analizá sin
+tocar nada, armá un **plan** y esperá el "sí", trabajá sobre una **copia**
+(nunca la carpeta original), importala con `vammo_importar_carpeta` (corrés
+el comando tar + curl que te da), cargá secretos con `vammo_secretos`, datos
+con `vammo_importar_datos`, verificá con `vammo_captura` y
+`vammo_consultar_base`, y recién después `vammo_promover`.
 
 ## Referencias
 
 - `references/guia.md` — la guía completa (la misma que devuelve `vammo_guia`).
 - `references/reglas.md` — reglas técnicas: `vammo.yaml`, SDK, estructura por
   tipo de app, ambientes.
+- `references/migrar.md` — cómo migrar una app que ya existe: análisis,
+  equivalencias (login, base, secretos, archivos, mails, IA, Slack, tareas
+  programadas), plan e importación.
 - `references/herramientas.md` — qué hace cada herramienta y qué devuelve.
 - `references/conectar.md` — cómo conectar Vammo Apps en claude.ai, Claude
   Desktop, Claude Code y ChatGPT.

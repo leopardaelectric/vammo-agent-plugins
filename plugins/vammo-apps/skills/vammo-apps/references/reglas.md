@@ -32,6 +32,9 @@ type: webapp                 # webapp | dashboard | cronjob | api | frontend
 runtime: python              # python | node | static
 description: "Ventas diarias por sucursal"
 files: true                  # usa el SDK files (se aprueba solo)
+email: true                  # manda mails con el SDK email a la empresa (se aprueba solo)
+ai: true                     # usa la IA de la plataforma (SDK ai; se aprueba solo)
+slack: [ventas-alertas]      # canales de Slack registrados en la plataforma (notify.slack)
 data:
   datasets: [vammo_r.bike]   # SOLO nombres de vammo_datasets
   pii: []                    # datasets de los que necesita columnas personales (aprobación)
@@ -53,11 +56,35 @@ access: [todos]              # todos, emails o grupo:<nombre>
   devuelven `index.html`. En una webapp es el default.
 - `backend: <api>` (solo frontend estático): el proyecto `api` que atiende
   `/api/*` del mismo sitio.
+- `email`: `email: true` manda solo a direcciones de la empresa. Para
+  mandar también afuera, el bloque (pasa por revisión; pedilo con
+  `vammo_pedir_acceso` tipo=email valor=externo y una justificación):
+
+  ```yaml
+  email:
+    external: true
+    name: Reportes Norte     # opcional: el remitente es "<name> via Vammo Apps"
+  ```
+
+- `ai`: `ai: true` sin datos personales. Si la app le manda a la IA datos
+  personales (de `data.pii` o de su propia base), el bloque (pasa por
+  revisión; pedilo con `vammo_pedir_acceso` tipo=ai valor=pii):
+
+  ```yaml
+  ai:
+    pii: true
+  ```
+
+  Una app que declara `data.pii` y usa `ai` **tiene** que decirlo: `pii:
+  true` o `pii: false` (si no, el chequeo la rechaza).
+- `slack`: nombres de canales que registró un admin (minúsculas, números y
+  guiones). Nunca la URL del webhook (el chequeo rechaza URLs de
+  `hooks.slack.com` en el código).
 
 ## SDK (Python)
 
 ```python
-from vammo import data, db, user, secrets, cache, log, files
+from vammo import data, db, user, secrets, cache, log, files, email
 
 data.query(dataset, **filtros, limit=N)          # datos de la empresa (solo lectura)
 db.migrate("migrations")                         # tablas: migrations/001_*.sql, 002_*.sql… (una vez cada uno)
@@ -72,10 +99,20 @@ log.info(msg, **campos) / log.debug / log.warn / log.error
 files.put(ruta, datos, public=True) / files.get(ruta) / files.list("fotos/") / files.delete(ruta)
 files.url(ruta)                                  # enlace que vence (privados)
 files.upload_url(ruta, public=True, content_type="image/jpeg", max_bytes=N)  # subida desde el navegador
+email.send(to=["ana@vammo.com"], subject="...", text="...", html=None, reply_to=None,
+           attachments=["reporte.csv", ("datos.csv", contenido_bytes)])     # mails (email: true)
+ai.complete("Resumí en 3 líneas: ...", system=None, model="default", max_tokens=1024)   # IA (ai: true)
+ai.complete(prompt, json_schema={...})          # respuesta como dict según el esquema
+ai.classify(texto, ["reclamo", "consulta", "elogio"])   # una de las categorías
+ai.extract(texto, {"nombre": "nombre del cliente", "monto": "monto en reales"})  # dict
+notify.slack("ventas-alertas", "Reporte listo", blocks=None)   # Slack (slack: [ventas-alertas])
 ```
 
-Node: `import { data, db, user, secrets, cache, log, files } from "@vammo/sdk"`
-(mismas primitivas, con `await`; `user.hasPermission`, `files.uploadUrl`). En
+Node: `import { data, db, user, secrets, cache, log, files, email, ai, notify } from "@vammo/sdk"`
+(mismas primitivas, con `await`; `user.hasPermission`, `files.uploadUrl`,
+`email.send({ to, subject, text, html, replyTo, attachments })`,
+`ai.complete({ prompt, system, model, maxTokens, jsonSchema })` → `{ text, json, … }`,
+`ai.text(prompt)`, `ai.classify`, `ai.extract`, `notify.slack(canal, texto, { blocks })`). En
 Next.js el SDK va **solo** del lado servidor (nunca en `"use client"`).
 
 **`data.query`** (columnas: `vammo_datasets` con filtro o
@@ -127,6 +164,59 @@ minutos. Subida desde el navegador: la API da `files.upload_url(...)` y el
 navegador hace `fetch(url, {method: "PUT", headers, body: archivo})`.
 Rutas con letras, números, `.`, `_`, `-`, `/`. Topes: 25 MB por archivo, 5
 GB por app. Los registros van en `db`; `files` es para archivos.
+
+**Mails (`email: true`)**: salen de la plataforma como `"<app> via Vammo
+Apps" <noreply-apps@vammo.com>`, con Reply-To al dueño de la app (o
+`reply_to`). Nada de SMTP, SES ni APIs de mail propias (no hay internet ni
+credenciales). Sin `email.external` aprobado, solo a dominios de la empresa
+(si no, error 403 que lo dice). En **dev** el asunto lleva `[DEV]` y solo
+reciben el dueño y los miembros de la app (al resto lo saltea: `skipped`).
+Topes: 50 destinatarios por mail, 10 adjuntos y 5 MB en total (para algo
+más grande, guardalo con `files` y mandá el link), cuota diaria por app
+(500 destinatarios en tier basic; error 429 al pasarla) y un límite por
+minuto. El HTML va tal cual pero sin `<script>`, `<iframe>`, `<object>` ni
+`<embed>` (HTML simple, estilos en línea). Errores: `EmailError` (`status`,
+`retry_after`). Ejemplo, un cronjob con resumen diario:
+
+```python
+from vammo import data, email
+
+def run():
+    filas = data.query("<dataset>", fecha="2026-10-14", group_by=["sucursal"],
+                       aggregates={"total": "sum(monto)"})
+    texto = "\n".join(f"{f['sucursal']}: {f['total']}" for f in filas)
+    email.send(to=["ventas@vammo.com"], subject="Ventas de ayer", text=texto)
+```
+
+**IA (`ai: true`)**: la app usa la IA de la plataforma (Claude) por el
+Bridge, sin claves propias ni internet. `model`: `"default"` (equilibrado)
+o `"fast"` (rápido y barato, para clasificar o extraer); `max_tokens` hasta
+8192 (por defecto 1024); `effort` low (por defecto), medium o high. Con
+`json_schema` la respuesta respeta el esquema y vuelve como dict/lista.
+Cuota diaria de tokens por app (200 mil en tier basic; error
+`AIQuotaError` al pasarla) y un límite por minuto. Si el modelo se niega
+(contenido que sus reglas no permiten), `AIRefusalError`. Los prompts no se
+guardan; igual, no le mandes datos personales sin `ai.pii` aprobado.
+Cacheá respuestas que se repiten (`cache`) y no llames a la IA en un loop
+sobre miles de filas: agrupá. Ejemplo, clasificar reclamos nuevos en un
+cronjob:
+
+```python
+from vammo import ai, db
+
+def run():
+    for r in db.query("SELECT id, texto FROM reclamos WHERE categoria IS NULL LIMIT 50"):
+        cat = ai.classify(r["texto"], ["entrega", "cobro", "bici rota", "otro"])
+        db.execute("UPDATE reclamos SET categoria = %s WHERE id = %s", cat, r["id"])
+```
+
+**Slack (`slack: [canal]`)**: `notify.slack("ventas-alertas", texto)` manda
+al canal registrado con ese nombre (texto con formato de Slack: `*negrita*`,
+`<https://…|link>`; `blocks` de Block Kit opcionales). El mensaje sale
+firmado con el nombre de la app; en dev lleva `[DEV]`. Cuota diaria por app
+(200 mensajes) y un límite por minuto: juntá avisos en un solo mensaje.
+Errores: `NotifyError` (404 si el canal no está registrado: lo registra un
+admin).
 
 ## Estructura por tipo
 
