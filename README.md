@@ -1,6 +1,6 @@
 # Vammo agent plugins
 
-Plugins that connect Claude Code and Codex to Vammo systems. The repository is public so that everyone at Vammo can install it without GitHub access; it contains no credentials. Every tool call still requires signing in with a Vammo account and runs with that person's own permissions.
+Plugins that connect Claude Code, Codex and Claude chat to Vammo systems: the Vammo Work Tracker and Vammo Apps. The repository is public so that everyone at Vammo can install it without GitHub access; it contains no credentials. Every tool call still requires signing in with a Vammo account and runs with that person's own permissions.
 
 ## vammo-work-tracker
 
@@ -72,6 +72,48 @@ If you added the server by hand or copied the skill, remove them so tools are no
 - `claude mcp remove vammo`
 - delete `~/.claude/skills/vammo-work-tracking/`
 - in Codex, remove the `[mcp_servers.vammo]` block from `~/.codex/config.toml`.
+
+## vammo-apps
+
+The plugin installs:
+- the remote MCP server of [Vammo Apps](https://admin.apps.vammo.com) (`https://api.apps.vammo.com/mcp`, Vammo sign-in), the internal platform where anyone at Vammo builds apps with company data without programming;
+- the `vammo-apps` skill: Claude interviews the person, proposes the design in plain language, writes the code, deploys it to the app's dev environment, shows the result, requests the permissions it needs (sensitive data, external hosts, secrets) and promotes it to production. Secrets are never typed in the chat: Claude hands out a one-time link of the portal.
+
+People only need to say what they want ("quiero una app que…").
+
+### Claude Code
+
+```bash
+claude plugin marketplace add leopardaelectric/vammo-agent-plugins
+claude plugin install vammo-apps@vammo
+```
+
+Restart Claude Code, run `/mcp`, select `plugin:vammo-apps:vammo-apps` and choose **Authenticate**.
+
+### Codex
+
+```bash
+codex plugin marketplace add leopardaelectric/vammo-agent-plugins
+codex plugin add vammo-apps@vammo
+codex mcp login vammo-apps
+```
+
+### Claude chat on the web and desktop (Claude Team or Enterprise)
+
+Most Vammo Apps users are not engineers, so this is the main channel:
+
+1. **Organization settings → Connectors**: add the Vammo Apps connector with URL `https://api.apps.vammo.com/mcp`.
+2. **Organization settings → Plugins & skills → Add → Upload**: a ZIP of `plugins/vammo-apps` whose root holds `.claude-plugin/plugin.json` (forward-slash paths), availability **Installed by default**.
+
+Each person connects once (Vammo sign-in) and can then ask Claude for an app in any chat. ChatGPT users follow the steps on [admin.apps.vammo.com/conectar](https://admin.apps.vammo.com/conectar).
+
+### For the whole organization in Claude Code
+
+Add `"vammo-apps@vammo": true` to `enabledPlugins` in the managed settings shown for the work tracker above.
+
+### Keeping the skill in sync
+
+The skill's source of truth is `integrations/claude-skill/vammo-apps` in the Vammo Apps repository (it is tested against the platform's real tool list). Copy it here when it changes and bump `version` in `plugins/vammo-apps/.claude-plugin/plugin.json`, `.mcp.json` (`X-Vammo-Plugin`) and `.claude-plugin/marketplace.json`.
 
 ## Changing a plugin
 
