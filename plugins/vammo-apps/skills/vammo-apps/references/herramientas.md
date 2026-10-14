@@ -12,7 +12,8 @@ idioma de la persona) y `next_steps` (qué hacer después). `ambiente` es
 | `vammo_conocimiento` | La base de conocimiento viva de la empresa: `accion` `listar` (índice, "siempre leer" primero), `buscar` (`q`) o `leer` (`slug`: el artículo con versión y fecha). Consultala antes de diseñar. |
 | `vammo_novedades` | Lo que pasó desde la última vez: deploys listos o fallidos, pedidos aprobados/cerrados/comentados, cronjobs que fallaron, secretos cargados. Marca como leídas. |
 | `vammo_mis_apps` | Las apps de la persona con URLs, último deploy y si esperan aprobación. |
-| `vammo_datasets` | Catálogo de datos (`filtro`): sensibilidad, si requiere aprobación, columnas, filtrables y personales. |
+| `vammo_datasets` | Catálogo de datos: `concepto` busca en palabras de la persona (es/pt/en: moto → bike, deuda → debts) y dice por qué coincide cada dataset y cómo se cruza con otros; `filtro` busca por nombre. Sensibilidad, si requiere aprobación, columnas, filtrables y personales. |
+| `vammo_buscar_datos` | De una necesidad (`pregunta`) a un plan: datasets candidatos, columnas, claves de cruce, filtros, agregados y un SQL sugerido para `data.sql`. Lo inferido viene marcado: verificalo con `vammo_muestra_datos`. |
 | `vammo_muestra_datos` | Esquema y hasta 10 filas de ejemplo de un dataset, leídas con los permisos de una app ya publicada (`app`); columnas personales tapadas. |
 | `vammo_plantillas` | Plantillas y cuándo usar cada una; con `plantilla`, su contenido. |
 
@@ -42,8 +43,8 @@ idioma de la persona) y `next_steps` (qué hacer después). `ambiente` es
 | Herramienta | Para qué |
 |---|---|
 | `vammo_promover` | Dev → prod. Sin `confirmar`: vista previa (archivos que cambian, qué pediría aprobación). Con `confirmar: true`: lo hace. |
-| `vammo_logs` | Logs con `buscar`, `nivel` (error/warn), `desde` (15m, 2h, 1d), `lineas`; para cronjobs, sus corridas. |
-| `vammo_ejecutar` | Corre un cronjob ahora. |
+| `vammo_logs` | Logs con `buscar`, `nivel` (error/warn), `desde` (15m, 2h, 1d), `lineas`; para cronjobs, sus corridas; con `job`, las corridas de un job de la app (`"*"` = todos). |
+| `vammo_ejecutar` | Corre ahora un cronjob, o con `job` uno de los jobs de la app (`vammo.yaml` → `jobs`). |
 | `vammo_historial` | Versiones y deploys (prod por defecto). |
 | `vammo_volver_version` | Vuelve a un commit anterior (prod por defecto). Sin `confirmar`: vista previa. |
 | `vammo_uso` | Consumo: base de datos, archivos, página publicada, deploys y corridas. |

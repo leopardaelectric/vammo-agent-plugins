@@ -6,7 +6,8 @@ La plataforma **chequea cada cambio y rechaza** lo que no cumpla estas reglas
 ## Reglas absolutas
 
 1. **Datos**: dos fuentes, siempre por el SDK.
-   - Datos de la empresa → `data.query(...)` (ClickHouse, **solo lectura**).
+   - Datos de la empresa → `data.query(...)`, o `data.sql(...)` para cruzar
+     datasets (ClickHouse, **solo lectura**).
    - Datos propios de la app → `db` (su Postgres, lectura y escritura; cada
      app y cada ambiente tiene la suya).
    Nunca importes drivers ni clientes de bases o infraestructura (psycopg,
@@ -51,10 +52,16 @@ roles:                       # roles DENTRO de la app (opcional, se aprueba solo
   lector: []
 default_role: lector         # rol de quien no tiene uno asignado
 # schedule: "0 7 * * *"      # cronjob: cron en hora de la empresa (America/Sao_Paulo)
+jobs:                        # tareas programadas DENTRO de la app (webapp, api, dashboard, Node)
+  - name: snapshot_deuda     # minúsculas, números, _ o -
+    schedule: "0 6 * * *"    # cron de 5 campos, hora de la empresa
+    run: jobs.py:snapshot    # archivo.py:funcion (Node: jobs.js#snapshot)
 ```
 
 - Todo `data.query("x")` del código tiene que estar en `data.datasets`, y
-  todo `secrets.get("X")` en `secrets`.
+  todo `secrets.get("X")` en `secrets`. Lo mismo las tablas de `data.sql`
+  (FROM / JOIN): el chequeo las lee del texto y el Bridge las vuelve a
+  validar al correr.
 - `access`: además del dueño y el equipo técnico, que entran siempre. Si no
   está: todos, **salvo que la app lea datos sensibles** (ahí solo dueño y
   equipo técnico hasta declararlo; abrirla a más gente pide aprobación).
@@ -100,6 +107,7 @@ default_role: lector         # rol de quien no tiene uno asignado
 from vammo import data, db, user, secrets, cache, log, files, email
 
 data.query(dataset, **filtros, limit=N)          # datos de la empresa (solo lectura)
+data.sql("SELECT ... FROM a JOIN b ON ...", params={...}, limit=N)  # cruzar datasets (solo SELECT)
 db.migrate("migrations")                         # tablas: migrations/001_*.sql, 002_*.sql… (una vez cada uno)
 db.query("SELECT ... WHERE id = %s", valor)      # leer tu base (parámetros %s; en Node $1, $2…)
 db.execute("INSERT/UPDATE ...", *params)         # escribir tu base
@@ -162,6 +170,37 @@ for pagina in data.pages("<dataset>", order_by=["fecha"], limit=5000):  # todo, 
   minuto (status 429) dice cuándo reintentar: usá `cache`.
 - Node: `{ orderBy, groupBy, aggregates, columns, limit }`, `filas.nextPage`,
   `for await (const p of data.pages(...))`, `data.ANY`.
+
+**`data.sql`**: un SELECT de ClickHouse para cruzar datasets, subconsultas,
+CASE o funciones de fecha. Buscá los datasets y las claves de cruce con
+`vammo_buscar_datos`; confirmá columnas con `vammo_muestra_datos`.
+
+```python
+deuda = data.sql("""
+    SELECT toDate(r.start_date) AS dia, b.user_id, sum(r.total_debts) AS deuda
+    FROM vammo_r.bike AS b
+    JOIN vammo_r.reconciliation_reports AS r ON r.subscription_id = b.subscription_id
+    WHERE b.status = :estado AND r.start_date >= {desde:Date}
+    GROUP BY dia, b.user_id
+    ORDER BY dia
+""", params={"estado": "active", "desde": "2026-09-01"}, limit=5000)
+```
+
+- Los valores **siempre** como parámetros: `:nombre` (el tipo sale del
+  valor; una lista sirve para `col IN :lista`) o `{nombre:Tipo}` (`Date`,
+  `DateTime`, `Int64`, `String`…). Nunca f-strings ni `+` con valores: el
+  chequeo lo marca.
+- Se acepta: `SELECT` con `WITH nombre AS (…)`, `JOIN … ON/USING`, `WHERE`,
+  `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `UNION ALL` y funciones comunes
+  (agregados, fechas, textos, `if`, `CASE`, `CAST`…). Se rechaza: varias
+  sentencias, `SETTINGS`, `FORMAT`, `INTO OUTFILE`, funciones de tabla,
+  tablas del sistema, funciones de ventana (`OVER`) y lambdas.
+- Solo datasets declarados y sus columnas visibles: una columna personal
+  sin `data.pii` aprobado o una interna da error (también en `WHERE` y
+  `JOIN`). `SELECT *` trae solo las visibles.
+- El tope de filas del tier se aplica igual: mirá `.truncated`. Errores:
+  `DataError` con el motivo y la posición del SQL.
+- Node: `await data.sql(sql, { params: {...}, limit: 1000 })`.
 
 **Identidad**: región y permisos salen del directorio de la empresa.
 `user.has_permission("x")` es verdadero solo si el directorio le da ese
@@ -259,6 +298,14 @@ admin).
 - **dashboard**: UI en `app.py` (Streamlit).
 - **cronjob**: función `run()` en `main.py`; corre según `schedule`. Probalo
   con `vammo_ejecutar`; la salida queda en `vammo_logs`.
+- **jobs** (en una webapp, api, dashboard o app Node): cada job es una
+  función sin argumentos (`run: jobs.py:snapshot` → `def snapshot():` en
+  `jobs.py`; Node `jobs.js#snapshot`, con TypeScript el compilado
+  `dist/jobs.js#snapshot`) que corre a su hora con la misma base, caché,
+  archivos y permisos de datos que la app (no con la persona: `user` está
+  vacío). Tope de 1 hora por corrida; si la anterior sigue, la nueva se
+  omite: que sea idempotente. Probalo con `vammo_ejecutar` + `job`; las
+  corridas se ven en `vammo_logs` con `job` y en el portal (Logs).
 - **api**: endpoints en `main.py` (FastAPI, el middleware de identidad ya
   viene) o controllers en `src/` (NestJS, `VammoMiddleware` ya está).
 - **frontend** estático: `index.html` que usa su `backend` con `fetch("/api/...")`.
