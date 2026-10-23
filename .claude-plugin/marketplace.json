@@ -23,7 +23,7 @@
     {
       "name": "vammo-security",
       "source": "./plugins/vammo-security",
-      "description": "Pre-PR security check for Claude Code: scans the branch's changes with claude-security before a PR is opened, fixes the findings with its verified patches, and records the result on the Work Tracker.",
+      "description": "Security gates for Claude Code: TruffleHog secret checks before git push and PR, plus a claude-security scan of the branch with verified fixes before the PR is opened.",
       "version": "0.2.0",
       "dependencies": [
         {
