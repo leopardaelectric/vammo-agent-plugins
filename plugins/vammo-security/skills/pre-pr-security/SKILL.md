@@ -79,6 +79,17 @@ Run `git status --porcelain --untracked-files=no`.
 
 The HEAD is covered now, so the hook lets the PR through without another scan.
 
+## When a gate reports secrets
+
+Before a `git push` and before a PR, the hook runs TruffleHog on the commits being published. If it finds something, it holds the call and lists each hit by detector, file, line, commit and id. It never shows the value, and you must never print or repeat one either.
+
+- **LIVE (verified working):** it must come out. Move the value to the environment or secrets manager, then remove it from the branch's history with a fixup commit and a non-interactive autosquash rebase (the hook message has the commands). Tell the person before rewriting history.
+  - If it was already pushed, the person must also rotate the credential, and the branch needs `git push --force-with-lease`. Confirm with them before force-pushing.
+- **Unverified:** ask the person whether it's a real secret.
+  - Real: remove it as above.
+  - False positive (fixture, placeholder): run `STATE accept-secret <id> <their reason>`. Neither gate raises it again, and the PR summary counts it.
+- Then retry the push or the PR.
+
 ## Skipping
 
 Skip the scan only when the person explicitly says so in this session (for example "skip the security check for this PR"). Then:

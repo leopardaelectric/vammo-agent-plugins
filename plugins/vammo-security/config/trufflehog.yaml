@@ -1,0 +1,14 @@
+# Internal-secret detectors that provider-specific detectors miss.
+# Keep in sync with leopardaelectric/shared-ci .github/workflows/security-trufflehog.yml,
+# so a secret the local gate lets through isn't caught later by CI, or the other way round.
+detectors:
+  - name: connection-string-password
+    keywords: [postgres, postgresql, mysql, mongodb, redis, amqp]
+    regex:
+      password: '\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?):\/\/[A-Za-z0-9_.-]+:([^@\s''"]{6,})@'
+    entropy: 2.5
+  - name: env-style-secret-assignment
+    keywords: [secret, password, api_key, apikey, token]
+    regex:
+      value: '(?i)\b[A-Z0-9_]*(?:SECRET|PASSWORD|PASSWD|API_?KEY|TOKEN)[A-Z0-9_]*["'']?\s*[:=]\s*["'']([A-Za-z0-9+\/_\-!@#$%^&*]{12,})["'']'
+    entropy: 3

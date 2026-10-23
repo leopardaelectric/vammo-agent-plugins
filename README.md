@@ -97,7 +97,13 @@ Restart Claude Code. The skills appear as `/vammo-claude-skills:<name>`; the age
 
 ## vammo-security
 
-A security check before every pull request opened from Claude Code. When Claude is about to open a PR (`gh pr create`, or a GitHub MCP `create_pull_request` tool) and the branch's HEAD hasn't been scanned yet, the plugin holds the PR. Claude then runs the `pre-pr-security` skill without asking:
+Security gates for work done in Claude Code. Two of them cost no model tokens: TruffleHog runs on the commits being published, before every `git push` and again before every PR. It uses the same version and custom detectors as the CI secret gate.
+
+- A **live** (verified) secret always holds the push or PR. Claude removes it from the branch's history, and tells the person to rotate it if it was already pushed.
+- An **unverified** hit holds until the person confirms whether it's real. A confirmed false positive isn't raised again.
+- TruffleHog isn't vendored. A `trufflehog` on PATH is used, or the pinned release is downloaded once and its checksum verified. If it can't run, the check is skipped, never blocking.
+
+Then, before every pull request: when Claude is about to open a PR (`gh pr create`, or a GitHub MCP `create_pull_request` tool) and the branch's HEAD hasn't been scanned yet, the plugin holds the PR. Claude then runs the `pre-pr-security` skill without asking:
 
 1. It scans the branch's changes with Anthropic's [claude-security](https://claude.com/product/claude-security) plugin ("scan changes", medium effort).
 2. It fixes the findings with claude-security's own patches. Before a patch is written, independent agents check that it closes the finding, introduces no new vulnerability and leaves behaviour unchanged. A finding it won't patch is the one point where Claude stops and asks the person.
