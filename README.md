@@ -94,3 +94,38 @@ claude plugin install vammo-claude-skills@vammo
 ```
 
 Restart Claude Code. The skills appear as `/vammo-claude-skills:<name>`; the agents as `vammo-claude-skills:<name>`. Claude Code only.
+
+## vammo-security
+
+A security check before every pull request opened from Claude Code. When Claude is about to open a PR (`gh pr create`, or a GitHub MCP `create_pull_request` tool) and the branch's HEAD hasn't been scanned yet, the plugin holds the PR. Claude then runs the `pre-pr-security` skill without asking:
+
+1. It scans the branch's changes with Anthropic's [claude-security](https://claude.com/product/claude-security) plugin ("scan changes", medium effort).
+2. It fixes the findings with claude-security's own patches. Before a patch is written, independent agents check that it closes the finding, introduces no new vulnerability and leaves behaviour unchanged. A finding it won't patch is the one point where Claude stops and asks the person.
+3. It commits and pushes the fixes as one commit.
+4. It records the result as a check on the Vammo Work Tracker work item, when one is active.
+5. It opens the PR with a short "Security pre-check" section in the body.
+
+Coverage is kept per worktree in the git dir, so:
+
+- the same HEAD is never scanned twice;
+- a later push scans only the new commits.
+
+The scan runs on the person's own Claude Code plan, so there is no per-PR CI cost. Measured on 2026-10-23 at medium effort:
+
+- a clean branch takes about 3–4 minutes;
+- a branch with findings takes longer. A 28-line branch with 3 planted vulnerabilities took 17 minutes end to end (about $8.8 at list price): about 4 minutes of scan, and the rest building and verifying the 3 patches. This is a guide, not a gate: a PR opened outside Claude Code isn't checked.
+
+Claude Code only. It needs Python 3 (claude-security needs it too).
+
+```bash
+claude plugin marketplace add leopardaelectric/vammo-agent-plugins
+claude plugin install vammo-security@vammo
+```
+
+claude-security is a declared dependency from `claude-plugins-official`, so it is installed with the plugin. The marketplace allows that cross-marketplace dependency. Restart Claude Code afterwards. For the whole organization, add `"vammo-security@vammo": true` to `enabledPlugins` in the managed settings shown above.
+
+Turning it off:
+
+- for one session: start Claude Code with `VAMMO_SECURITY=off`;
+- for folders that aren't company work: list them in `~/.vammo/tracked-folders`, the same file the Work Tracker uses;
+- for one PR: tell Claude "skip the security check". Claude records the skip, and the PR summary says the check was skipped.
