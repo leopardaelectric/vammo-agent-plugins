@@ -110,7 +110,10 @@ Coverage is kept per worktree in the git dir, so:
 - the same HEAD is never scanned twice;
 - a later push scans only the new commits.
 
-The scan runs on the person's own Claude Code plan, about 3–4 minutes at medium, so there is no per-PR CI cost. This is a guide, not a gate: a PR opened outside Claude Code isn't checked.
+The scan runs on the person's own Claude Code plan, so there is no per-PR CI cost. Measured on 2026-10-23 at medium effort:
+
+- a clean branch takes about 3–4 minutes;
+- a branch with findings takes longer. A 28-line branch with 3 planted vulnerabilities took 17 minutes end to end (about $8.8 at list price): about 4 minutes of scan, and the rest building and verifying the 3 patches. This is a guide, not a gate: a PR opened outside Claude Code isn't checked.
 
 Claude Code only. It needs Python 3 (claude-security needs it too).
 

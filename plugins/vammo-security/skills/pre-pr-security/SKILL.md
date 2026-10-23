@@ -47,7 +47,10 @@ Run `git status --porcelain --untracked-files=no`.
 2. When it finishes, look in `<REPORT>/patches/`:
    - each `F<n>.patch` is a fix that its verifier vouched for;
    - an `F<n>.md` without a `.patch` is a finding it would not fix automatically.
-3. Apply every patch. First run `git apply --check <REPORT>/patches/F<n>.patch`, then `git apply`.
+3. Apply every patch, one at a time in id order. Each was built alone against the same HEAD, so patches for the same file often overlap:
+   - Try `git apply --check <REPORT>/patches/F<n>.patch`. If it passes, run `git apply` on it, then `git add` the files it touched.
+   - If it fails, run `git apply --3way` on it. Resolve each conflict by keeping every patch's lines exactly as that patch wrote them, then `git add` the file.
+   - If two patches change the same line in incompatible ways, don't invent a merge. Treat the later finding as one without a patch (next step).
 4. Handle the findings that have no patch:
    - If there are none, continue to item 5.
    - Otherwise, stop and show the person each one: its title, `file:line`, and the note's reason. Ask once which they want:
