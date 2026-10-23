@@ -1,0 +1,28 @@
+{
+  "description": "Holds a pull-request creation (gh pr create, or a GitHub MCP create_pull_request tool) until the branch's HEAD has been scanned by claude-security, and tells Claude to run the pre-pr-security skill first.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(gh pr create *)",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/vammo_security.py\" hook",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*__create_pull_request",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/vammo_security.py\" hook",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

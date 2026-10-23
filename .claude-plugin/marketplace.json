@@ -19,6 +19,21 @@
       },
       "description": "Shared Claude Code skills, commands and agents for the Vammo engineering team: local-dev-cycle, dev-qa-live-tests, deployment-agent and the agents behind them.",
       "category": "team-tooling"
+    },
+    {
+      "name": "vammo-security",
+      "source": "./plugins/vammo-security",
+      "description": "Pre-PR security check for Claude Code: scans the branch's changes with claude-security before a PR is opened, fixes the findings with its verified patches, and records the result on the Work Tracker.",
+      "version": "0.1.0",
+      "dependencies": [
+        {
+          "name": "claude-security",
+          "marketplace": "claude-plugins-official"
+        }
+      ]
     }
+  ],
+  "allowCrossMarketplaceDependenciesOn": [
+    "claude-plugins-official"
   ]
 }
