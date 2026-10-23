@@ -1,7 +1,7 @@
 {
   "name": "vammo-security",
   "displayName": "Vammo Security",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Security gates for Claude Code: TruffleHog blocks secrets before git push and before a PR (no model tokens), and before a PR Claude scans the branch's changes with the official claude-security plugin, fixes the findings with its verified patches and records the result on the Vammo Work Tracker.",
   "author": {
     "name": "Vammo"

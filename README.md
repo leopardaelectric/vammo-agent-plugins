@@ -101,7 +101,7 @@ Security gates for work done in Claude Code. Two of them cost no model tokens: T
 
 - A **live** (verified) secret always holds the push or PR. Claude removes it from the branch's history, and tells the person to rotate it if it was already pushed.
 - An **unverified** hit holds until the person confirms whether it's real. A confirmed false positive isn't raised again.
-- TruffleHog isn't vendored. A `trufflehog` on PATH is used, or the pinned release is downloaded once and its checksum verified. If it can't run, the check is skipped, never blocking.
+- TruffleHog isn't vendored. A `trufflehog` on PATH is used, or the pinned release is downloaded once and its checksum verified. If it can't run, the push or PR is held until it can (it fails closed).
 
 Then, before every pull request: when Claude is about to open a PR (`gh pr create`, or a GitHub MCP `create_pull_request` tool) and the branch's HEAD hasn't been scanned yet, the plugin holds the PR. Claude then runs the `pre-pr-security` skill without asking:
 
@@ -130,8 +130,9 @@ claude plugin install vammo-security@vammo
 
 claude-security is a declared dependency from `claude-plugins-official`, so it is installed with the plugin. The marketplace allows that cross-marketplace dependency. Restart Claude Code afterwards. For the whole organization, add `"vammo-security@vammo": true` to `enabledPlugins` in the managed settings shown above.
 
-Turning it off:
+Scope and exceptions:
 
-- for one session: start Claude Code with `VAMMO_SECURITY=off`;
-- for folders that aren't company work: list them in `~/.vammo/tracked-folders`, the same file the Work Tracker uses;
-- for one PR: tell Claude "skip the security check". Claude records the skip, and the PR summary says the check was skipped.
+- It runs in every repository with a remote on `github.com/leopardaelectric`, and in no other.
+- There is no off switch and no per-PR skip. The only exception is an unverified secret hit that the person confirms as a false positive. It is recorded with its file, line and reason, listed in the PR summary, and noted on the Work Tracker.
+- If claude-security isn't installed, the PR is held until it is.
+- This covers what goes through Claude Code. A push or PR made outside it isn't checked here, and the CI gates (TruffleHog in shared-ci) remain the backstop.
