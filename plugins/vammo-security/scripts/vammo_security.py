@@ -8,8 +8,8 @@ Two PreToolUse gates, both deterministic: no model runs inside this script.
   tool), two checks run:
   1. TruffleHog runs on the branch's commits. A secret holds the PR.
   2. The branch's HEAD must be "covered": it was scanned by the claude-security plugin, or
-     it is the commit that applied that scan's patches, or the person explicitly chose to
-     skip. If it isn't, Claude is told to run the pre-pr-security skill first.
+     it is the commit that applied that scan's patches. If it isn't, Claude is told to run
+     the pre-pr-security skill first. There is no skip.
 
 Secrets: a verified (live) secret always holds the push or PR. An unverified hit holds it
 until the person confirms it's a false positive (`accept-secret`); after that, neither gate
@@ -17,8 +17,8 @@ raises it again. Messages name the detector, file, line and commit, never the va
 
 TruffleHog: a `trufflehog` on PATH is used as is. Otherwise the pinned release (the same
 version shared-ci's CI gate runs) is downloaded once into the plugin's data dir, and its
-checksum is verified. If TruffleHog can't run, the secret gate is skipped with a note and
-never holds anything.
+checksum is verified. If TruffleHog can't run, the gate fails closed: it holds the push or
+PR and says what to fix.
 
 State lives in the repository's git dir (`git rev-parse --git-path vammo-security/state.json`),
 per worktree and never committed.
@@ -27,12 +27,12 @@ Subcommands:
   hook                  PreToolUse hook (reads the hook JSON on stdin).
   base                  Prints the newest covered ancestor of HEAD (incremental-scan base).
   cover REPORT_DIR      Records HEAD as covered by the claude-security scan in REPORT_DIR.
-  skip REASON           Records that the person chose to open the PR without a scan.
   accept-secret ID WHY  Records an unverified secret hit as a false positive.
   summary               Prints the "Security pre-check" section for the PR body.
 
-Opt-outs: VAMMO_SECURITY=off in the environment, or a folder that
-~/.vammo/tracked-folders (the Work Tracker's scope file) leaves untracked.
+Scope: every repository with a remote on github.com/leopardaelectric, and nothing else.
+There is no opt-out switch. The person's only exception is accepting an unverified secret
+hit as a false positive, which is recorded with where it is and why.
 """
 from __future__ import annotations
 
@@ -104,30 +104,15 @@ def note(msg: str) -> None:
     print(f"vammo-security: {msg}", file=sys.stderr)
 
 
-def in_scope(directory: str) -> bool:
-    """Same rule as the Work Tracker's session-start script: longest matching line wins."""
-    scope_file = os.environ.get("VAMMO_TRACKED_FOLDERS") or os.path.expanduser("~/.vammo/tracked-folders")
-    if not os.path.isfile(scope_file):
-        return True
+VAMMO_REMOTE = re.compile(r"github\.com[:/]leopardaelectric/", re.IGNORECASE)
 
-    def norm(p: str) -> str:
-        p = p.replace("\\", "/")
-        p = re.sub(r"^([A-Za-z]):", r"/\1", p)
-        return p.rstrip("/").lower()
 
-    target, best, verdict = norm(directory) + "/", -1, False
-    for raw in open(scope_file, encoding="utf-8", errors="replace"):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        yes = not line.startswith("!")
-        line = line.lstrip("!")
-        if line.startswith("~"):
-            line = os.path.expanduser("~") + line[1:]
-        rule = norm(line)
-        if target.startswith(rule + "/") and len(rule) > best:
-            best, verdict = len(rule), yes
-    return verdict
+def is_vammo_repo(top: str) -> bool:
+    """A Vammo repository is one with any remote on github.com/leopardaelectric."""
+    try:
+        return bool(VAMMO_REMOTE.search(git(top, "remote", "-v")))
+    except RuntimeError:
+        return False
 
 
 def claude_security_installed() -> bool:
@@ -178,34 +163,36 @@ def download_trufflehog(target: Path) -> None:
     tmp.replace(target)
 
 
-def trufflehog_bin() -> str | None:
+class ScannerUnavailable(RuntimeError):
+    """TruffleHog couldn't be found, installed or run."""
+
+
+def trufflehog_bin() -> str:
     own = shutil.which("trufflehog")
     if own:
         return own
     pinned = data_dir() / f"trufflehog-{TRUFFLEHOG_VERSION}" / "trufflehog"
     if pinned.is_file():
         return str(pinned)
+    note(f"downloading TruffleHog {TRUFFLEHOG_VERSION} (one time) into {pinned.parent}")
     try:
-        note(f"downloading TruffleHog {TRUFFLEHOG_VERSION} (one time) into {pinned.parent}")
         download_trufflehog(pinned)
-        return str(pinned)
-    except Exception as e:  # network down, unsupported platform, bad checksum: never hold work on it
-        note(f"TruffleHog unavailable ({e}); the secret check was skipped")
-        return None
+    except Exception as e:  # network, platform, checksum: the gate fails closed on any of them
+        raise ScannerUnavailable(f"couldn't install TruffleHog {TRUFFLEHOG_VERSION}: {e}") from e
+    return str(pinned)
 
 
-def secret_hits(top: str, base: str) -> list[dict] | None:
-    """Secrets TruffleHog finds in the commits base..HEAD (None when it couldn't run)."""
+def secret_hits(top: str, base: str) -> list[dict]:
+    """Secrets TruffleHog finds in the commits base..HEAD. Raises ScannerUnavailable."""
     binary = trufflehog_bin()
-    if not binary:
-        return None
     cmd = [binary, "git", f"file://{top}", "--json", "--no-update",
            "--since-commit", base, "--branch", "HEAD", "--config", str(PLUGIN_ROOT / "config" / "trufflehog.yaml")]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=100)
     except (OSError, subprocess.TimeoutExpired) as e:
-        note(f"TruffleHog failed to run ({e}); the secret check was skipped")
-        return None
+        raise ScannerUnavailable(f"TruffleHog failed to run: {e}") from e
+    if out.returncode != 0 and not out.stdout.strip():
+        raise ScannerUnavailable(f"TruffleHog exited {out.returncode}: {out.stderr.strip()[-300:]}")
     hits, seen = [], set()
     for line in out.stdout.splitlines():
         try:
@@ -310,13 +297,20 @@ def secrets_gate(top: str, gate: str, base: str | None) -> bool:
             return False  # nothing new to publish
     except RuntimeError:
         return False
-    hits = secret_hits(top, base)
+    try:
+        hits = secret_hits(top, base)
+    except ScannerUnavailable as e:
+        # Fail closed: an unchecked push or PR is exactly what this gate exists to stop.
+        deny(f"Vammo security check: the secret scan couldn't run, so this {gate} is held. {e}. "
+             "Tell the person, and help them fix it: check the network (the first run downloads "
+             "TruffleHog from GitHub), or install it (`brew install trufflehog`). Then retry the "
+             f"{gate}. There is no way to skip this check.")
+        return True
     data = load(top)
     accepted = data.get("accepted_secrets", {})
-    live = [h for h in hits or [] if h["verified"]]
-    unknown = [h for h in hits or [] if not h["verified"] and h["id"] not in accepted]
-    # What the PR summary reports: the result of the last check of this exact HEAD.
-    status = "not run" if hits is None else ("found" if live or unknown else "clean")
+    live = [h for h in hits if h["verified"]]
+    unknown = [h for h in hits if not h["verified"] and h["id"] not in accepted]
+    status = "found" if live or unknown else "clean"
     try:
         data.setdefault("secrets_checked", {})[git(top, "rev-parse", "HEAD")] = status
         save(top, data)
@@ -336,7 +330,7 @@ def cmd_hook() -> int:
     tool_name = str(event.get("tool_name", ""))
     tool_input = event.get("tool_input") or {}
     kind = classify(tool_name, tool_input) if isinstance(tool_input, dict) else None
-    if not kind or os.environ.get("VAMMO_SECURITY", "").lower() == "off":
+    if not kind:
         return 0
     cwd = str(event.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     try:
@@ -344,7 +338,7 @@ def cmd_hook() -> int:
         head = git(cwd, "rev-parse", "HEAD")
     except (RuntimeError, OSError, subprocess.TimeoutExpired):
         return 0  # not a git checkout: nothing to check
-    if not in_scope(top):
+    if not is_vammo_repo(top):
         return 0
 
     if kind == "push":
@@ -356,19 +350,20 @@ def cmd_hook() -> int:
     if secrets_gate(top, "pull request", default_base(top, preferred)):
         return 0
     if not claude_security_installed():
-        note("the claude-security plugin is not installed, so the pre-PR scan was skipped. "
-             "Install it with: claude plugin install claude-security@claude-plugins-official")
+        deny("Vammo pre-PR security check: the claude-security plugin isn't installed, so this pull "
+             "request is held. Tell the person to install it with "
+             "`claude plugin install claude-security@claude-plugins-official` and restart Claude Code, "
+             "then retry. There is no way to skip this check.")
         return 0
-    if head in load(top).get("covered", {}):
+    entry = load(top).get("covered", {}).get(head)
+    if entry and not entry.get("skipped"):  # "skipped" entries come from 0.2.0 and no longer count
         return 0
     deny(
         f"Vammo pre-PR security check: HEAD {head[:12]} has not been scanned yet. Before opening this "
         "pull request, load the `vammo-security:pre-pr-security` skill and follow it: scan the branch's "
         "changes with claude-security at medium effort, fix the findings with its verified patches, "
         "commit and push, record coverage, and then create the pull request again, adding the skill's "
-        "summary to the body. The person turned this on, so start the scan without asking first. If they "
-        "explicitly told you in this session to skip the security check, record that with the skill's "
-        "skip step instead."
+        "summary to the body. Start the scan without asking first. There is no way to skip this check."
     )
     return 0
 
@@ -437,30 +432,25 @@ def cmd_cover(report_dir: str) -> int:
     return 0
 
 
-def cmd_skip(reason: str) -> int:
-    top = git(os.getcwd(), "rev-parse", "--show-toplevel")
-    head = git(top, "rev-parse", "HEAD")
-    data = load(top)
-    data.setdefault("covered", {})[head] = {"at": now(), "skipped": True, "reason": reason[:500]}
-    data["last"] = head
-    save(top, data)
-    print(f"skip recorded for {head[:12]}")
-    return 0
-
-
 def cmd_accept_secret(hit_id: str, reason: str) -> int:
     if not re.fullmatch(r"[0-9a-f]{12}", hit_id):
         raise SystemExit(f"{hit_id!r} is not a secret-hit id (12 hex characters from the gate's message)")
     top = git(os.getcwd(), "rev-parse", "--show-toplevel")
     base = default_base(top)
-    hits = secret_hits(top, base) if base else None
-    match = next((h for h in hits or [] if h["id"] == hit_id), None)
-    if hits is not None and match is None:
+    if not base:
+        raise SystemExit("couldn't resolve the branch's base to check the hit against")
+    try:
+        hits = secret_hits(top, base)
+    except ScannerUnavailable as e:
+        raise SystemExit(f"can't confirm the hit, because the secret scan couldn't run: {e}")
+    match = next((h for h in hits if h["id"] == hit_id), None)
+    if match is None:
         raise SystemExit(f"no current secret hit has id {hit_id}")
-    if match and match["verified"]:
+    if match["verified"]:
         raise SystemExit("that hit is a LIVE (verified) secret; it can't be accepted, it has to be removed")
     data = load(top)
-    data.setdefault("accepted_secrets", {})[hit_id] = {"at": now(), "reason": reason[:500]}
+    where = {k: match[k] for k in ("detector", "file", "line", "commit")}
+    data.setdefault("accepted_secrets", {})[hit_id] = {"at": now(), "reason": reason[:500], **where}
     save(top, data)
     print(f"accepted {hit_id} as a false positive")
     return 0
@@ -490,18 +480,15 @@ def cmd_summary() -> int:
     head = git(top, "rev-parse", "HEAD")
     data = load(top)
     entry = data.get("covered", {}).get(head)
-    if not entry:
+    if not entry or entry.get("skipped"):
         print("(HEAD is not covered yet)")
         return 1
-    if entry.get("skipped"):
-        print(f"### 🛡️ Security pre-check\n\nSkipped by the author: {entry.get('reason', '')}")
-        return 0
     f = entry.get("findings", {})
     counts = ", ".join(f"{n} {s}" for s, n in f.items() if n) or "no findings"
     lines = ["### 🛡️ Security pre-check",
              "",
              {"clean": "Secret scan (TruffleHog): no unresolved secrets in this branch's commits.",
-              "not run": "Secret scan (TruffleHog) could not run for this HEAD."}.get(
+              }.get(
                  data.get("secrets_checked", {}).get(head, ""), "Secret scan (TruffleHog): not recorded for this HEAD."),
              f"claude-security scanned this branch's changes at `{entry.get('effort')}` effort before the PR "
              f"(verification: {entry.get('verification')}): {counts}."]
@@ -511,7 +498,10 @@ def cmd_summary() -> int:
         lines.append(f"Not auto-fixable (author decided): {', '.join(entry['declined'])}.")
     accepted = data.get("accepted_secrets", {})
     if accepted:
-        lines.append(f"Secret-scanner hits confirmed as false positives by the author: {len(accepted)}.")
+        lines.append("Secret-scanner hits the author confirmed as false positives:")
+        for hit_id, a in accepted.items():
+            where = f"`{a['file']}:{a.get('line')}` ({a.get('detector')})" if a.get("file") else f"id {hit_id}"
+            lines.append(f"- {where}: {a.get('reason', '')}")
     print("\n".join(lines))
     return 0
 
@@ -525,8 +515,6 @@ def main(argv: list[str]) -> int:
         return cmd_hook()
     if cmd == "cover" and len(rest) == 1:
         return cmd_cover(rest[0])
-    if cmd == "skip" and rest:
-        return cmd_skip(" ".join(rest))
     if cmd == "accept-secret" and len(rest) >= 2:
         return cmd_accept_secret(rest[0], " ".join(rest[1:]))
     if cmd == "base":
