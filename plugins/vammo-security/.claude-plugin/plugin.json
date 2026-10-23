@@ -1,13 +1,16 @@
 {
   "name": "vammo-security",
   "displayName": "Vammo Security",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Pre-PR security check for Claude Code: before Claude opens a pull request, it scans the branch's changes with the official claude-security plugin, fixes the findings with its verified patches, and records the result on the Vammo Work Tracker.",
   "author": {
     "name": "Vammo"
   },
   "repository": "https://github.com/leopardaelectric/vammo-agent-plugins",
   "dependencies": [
-    { "name": "claude-security", "marketplace": "claude-plugins-official" }
+    {
+      "name": "claude-security",
+      "marketplace": "claude-plugins-official"
+    }
   ]
 }
