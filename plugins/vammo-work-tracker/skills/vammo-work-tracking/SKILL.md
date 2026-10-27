@@ -43,9 +43,15 @@ wins. Paths compare without case; `C:\vammo` and `C:/vammo` are the same.
 4. If the person named a key (for example `VAM-42`), use it. Otherwise, if the state file has a
    work item for the same objective, reuse it.
 5. Otherwise generate a `workIntentId` (`wi-` + UUID), **write it to the state file first**, then
-   call `ensure_work_item` with the objective, repository full name, branch and
-   `creationPolicy: CREATE_IF_NO_MATCH`.
+   call `ensure_work_item` with the objective, repository full name, branch,
+   `creationPolicy: CREATE_IF_NO_MATCH` and, when the person already named the team that owns the
+   work, `proposedWork.responsibility: { kind: "team", teamId }`. Send
+   `{ kind: "personal", personalOwnerId }` only when they ask for personal work.
 6. On `needs_selection`, list the candidates and ask the person. Do not pick one yourself.
+   On `created` with `teamMissing: true`, the work item exists but has no team: list `teams`
+   (`member: true` marks the person's own) and ask which one owns it. Do not pick one yourself.
+   Assign it with `write_operation` `updateWorkItem`: `responsibility: { kind: "team", teamId }` and
+   the version from `get_work_item`.
 7. Call `start_work_session` with the client values above. Save `sessionId`, `workItemId` and
    `workItemKey` in the state file.
 8. Link the code you are working on (next section).
