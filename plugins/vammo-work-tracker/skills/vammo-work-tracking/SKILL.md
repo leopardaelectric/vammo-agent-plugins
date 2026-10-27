@@ -48,9 +48,10 @@ wins. Paths compare without case; `C:\vammo` and `C:/vammo` are the same.
    work, `proposedWork.responsibility: { kind: "team", teamId }`. Send
    `{ kind: "personal", personalOwnerId }` only when they ask for personal work.
 6. On `needs_selection`, list the candidates and ask the person. Do not pick one yourself.
-   On `needs_team`, nothing was created: list every team (`member: true` marks the person's own)
-   and ask which one owns the work. Do not pick one yourself. Call again with that
-   `responsibility`, the same `workIntentId` and a new `requestId`.
+   On `created` with `teamMissing: true`, the work item exists but has no team: list `teams`
+   (`member: true` marks the person's own) and ask which one owns it. Do not pick one yourself.
+   Assign it with `write_operation` `updateWorkItem`: `responsibility: { kind: "team", teamId }` and
+   the version from `get_work_item`.
 7. Call `start_work_session` with the client values above. Save `sessionId`, `workItemId` and
    `workItemKey` in the state file.
 8. Link the code you are working on (next section).
