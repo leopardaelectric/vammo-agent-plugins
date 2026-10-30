@@ -1,0 +1,22 @@
+name: Work Tracker writing package
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  writing-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Test synchronization and scope preservation
+        run: node --test plugins/vammo-work-tracker/scripts/*.test.mjs
+      - name: Verify distributed file integrity
+        run: node plugins/vammo-work-tracker/scripts/sync-writing-skill.mjs --verify-package
