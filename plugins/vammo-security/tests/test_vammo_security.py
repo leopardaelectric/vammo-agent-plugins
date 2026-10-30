@@ -67,7 +67,9 @@ class Detect(unittest.TestCase):
                         "git --git-dir=x/.git push", "git --work-tree x push", "git -C \"a b\" push",
                         "/usr/bin/git push", "\"git\" \"push\"", "echo $(git push)", "x=`git push`",
                         "{git,push}", "! git push", "subprocess.run(['git', '-C', d, 'push'])",
-                        "git \\\n  push", "git -C $(pwd) push"):
+                        "git \\\n  push", "git -C $(pwd) push",
+                        "git " + " ".join(f"-c {k}.x=1" for k in "abcdefghij") + " push",
+                        "git -c \"x.y=a b c d e f g\" push"):
             self.assertKinds(command, {"push"})
 
     def test_pr_creation_forms(self) -> None:
@@ -96,67 +98,72 @@ class Detect(unittest.TestCase):
         self.assertLess(time.perf_counter() - start, 1.0)
 
 
-class FollowedPlans(TempDirs):
-    """Plain command lines: the targets are followed exactly."""
+class ExactForms(TempDirs):
+    """Only four exact forms are judged on their target alone; anything else adds the session."""
 
-    def assertFollowed(self, command: str, plan: list) -> None:
+    def setUp(self) -> None:
+        super().setUp()
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
+        self.git_repo(self.other, "https://github.com/leopardaelectric/other-repo.git")
+
+    def assertExact(self, command: str, plan: list) -> None:
         self.assertEqual(self.plan(command), (plan, True), command)
 
-    def test_cd_and_dash_c(self) -> None:
-        self.assertFollowed(f"cd {self.other} && {PR} --fill", [("pr", self.other, None)])
-        self.assertFollowed(f"cd ../other; {PR} --fill", [("pr", self.other, None)])
-        self.assertFollowed(f"git -C {self.other} push", [("push", self.other, None)])
-        self.assertFollowed("git -C ../other push origin br", [("push", self.other, None)])
-        self.assertFollowed(f"cd {self.root} && git -C other push", [("push", self.other, None)])
-        self.assertFollowed(f"heavy-lock.sh run \"x\" -- git -C {self.other} push origin br",
-                            [("push", self.other, None)])
-        self.assertFollowed(f"{PR} --title 'fix #12' 2>&1 >/dev/null", [("pr", self.session, None)])
+    def assertNotExact(self, command: str) -> None:
+        plan, _ = self.plan(command)
+        self.assertIn(self.session, [d for _, d, _ in plan], command)
 
-    def test_review_mixed_push_and_pr_gates_both(self) -> None:
-        # Review: a push in the same command as a PR was dropped.
-        self.assertFollowed(f"git -C {self.other} push && {PR}", [("push", self.other, None), ("pr", self.session, None)])
-        self.assertFollowed(f"git push && {PR} -R someone/else", [("push", self.session, None), ("pr", None, None)])
-        self.assertFollowed(f"git push origin HEAD; {PR} -R someone/else --fill",
-                            [("push", self.session, None), ("pr", None, None)])
+    def test_the_four_forms(self) -> None:
+        o = self.other
+        self.assertExact(f"cd {o} && {PR} --title 'fix #12 (x)' --body-file b.md", [("pr", o, None)])
+        self.assertExact("cd ../other && git push -u origin br", [("push", o, None)])
+        self.assertExact(f"git -C {o} push origin br", [("push", o, None)])
+        self.assertExact("git -C ../other push", [("push", o, None)])
+        self.assertExact(f"git -C '{o}' push", [("push", o, None)])
+        self.assertExact(f"heavy-lock.sh run 'push other' -- git -C {o} push -u origin br", [("push", o, None)])
+        self.assertExact(f"/opt/x/heavy-lock.sh run x -- git -C {o} push", [("push", o, None)])
 
-    def test_review_quoted_operators_are_text(self) -> None:
-        self.assertFollowed("echo '>' && git push origin HEAD", [("push", self.session, None)])
-        self.assertFollowed(f"echo '>' && {PR} --fill", [("pr", self.session, None)])
+    def test_symlinks(self) -> None:
+        os.makedirs(os.path.join(self.session, "sub"))
+        os.symlink(os.path.join(self.session, "sub"), os.path.join(self.other, "lnk"))
+        self.assertExact(f"git -C {self.other}/lnk/.. push", [("push", self.session, None)])
+        self.assertExact(f"cd {self.other}/lnk/.. && git push", [("push", self.other, None)])
 
-    def test_review_flag_values_are_not_repo_flags(self) -> None:
-        self.assertFollowed(f"{PR} --title \"-Rsomeone/else\" --fill", [("pr", self.session, None)])
+    def test_near_misses_judge_the_session_too(self) -> None:
+        o = self.other
+        for command in (
+            f"cd {o} && {PR} -R leopardaelectric/other-repo", f"cd {o} && {PR} --repo=leopardaelectric/other-repo",
+            f"cd {o}; git push", f"cd {o} && git push; git push", f"cd {o} && git push | cat",
+            f"cd {o} && git push 2>&1", f"cd {o} && git push > log", f"cd {o} && git -c x=1 push",
+            f"cd {o} && git push \"$BR\"", f"cd {o} && {PR} --body \"$(cat b.md)\"", f"cd {o} && {PR} --body `cat b`",
+            f"cd {o} && {PR} --title 'git push'", f"/usr/bin/cd {o} && git push", f"builtin cd {o} && git push",
+            f"cd -P {o} && git push", f"false && cd {o} && git push", f"cd {o} && {PR} && git push",
+            f"git -C {o} -c x=1 push", f"git -C {o} --git-dir=x push", f"heavy-lock.sh run a b -- git -C {o} push",
+            f"heavy-lock.sh -- git -C {o} push", f"timeout 60 git -C {o} push",
+            f"GIT_DIR={self.session}/.git git -C {o} push", f"git -C {o} push\ngit push", f"git -C {o} push & git push",
+            f"git -C {o}/missing push", f"git -C {self.root} push", f"{PR} --fill",
+            f"cd {o} && gh api repos/leopardaelectric/other-repo/pulls -X POST --input b.json",
+        ):
+            self.assertNotExact(command)
 
-    def test_review_repo_flag_between_pr_and_create(self) -> None:
-        self.git_repo(self.session, "git@github.com:leopardaelectric/session-repo.git")
-        self.assertFollowed(PR_REPO_FIRST, [("pr", None, "leopardaelectric/x")])
-        self.assertFollowed("gh -R leopardaelectric/x pr create --fill", [("pr", None, "leopardaelectric/x")])
+    def test_redirecting_environment_turns_the_forms_off(self) -> None:
+        for name in ("GIT_DIR", "GIT_WORK_TREE", "GH_REPO"):
+            with mock.patch.dict(os.environ, {name: "x"}):
+                self.assertNotExact(f"git -C {self.other} push")
 
-    def test_review_api_formatting_args_dont_hide_the_endpoint(self) -> None:
-        self.git_repo(self.session, "git@github.com:leopardaelectric/session-repo.git")
-        command = "gh api repos/leopardaelectric/target/pulls -X POST --template \"--method=GET\" --input p.json"
-        self.assertFollowed(command, [("pr", None, "leopardaelectric/target")])
-        self.assertFollowed("gh api repos/leopardaelectric/session-repo/pulls -X GET", [("pr", self.session, None)])
-
-    def test_repo_flag(self) -> None:
-        self.git_repo(self.session, "git@github.com:leopardaelectric/session-repo.git")
-        self.git_repo(self.other, "https://github.com/leopardaelectric/other-repo")
-        self.assertFollowed(f"{PR} -R leopardaelectric/other-repo", [("pr", None, "leopardaelectric/other-repo")])
-        self.assertFollowed(f"{PR} --repo=https://github.com/LeopardaElectric/other-repo.git",
-                            [("pr", None, "leopardaelectric/other-repo")])
-        self.assertFollowed(f"{PR} --repo leopardaelectric/session-repo", [("pr", self.session, None)])
-        self.assertFollowed(f"{PR} -R someone/else", [("pr", None, None)])
-        self.assertFollowed(f"cd {self.other} && {PR} -R leopardaelectric/other-repo", [("pr", self.other, None)])
+    def test_non_vammo_targets_still_judge_the_session(self) -> None:
+        self.assertEqual(self.plan(f"{PR} -R someone/else --fill"), ([("pr", self.session, None)], True))
+        self.assertEqual(self.plan(f"git push; {PR} -R someone/else"),
+                         ([("push", self.session, None), ("pr", self.session, None)], True))
 
     def test_mcp_owner_and_repo(self) -> None:
-        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
-
         def plan(tool_input: dict) -> tuple[list, bool]:
             return vs.gate_plan({"pr"}, "mcp__github__create_pull_request", tool_input, self.session)
 
         self.assertEqual(plan({"owner": "leopardaelectric", "repo": "other-repo"}),
-                         ([("pr", None, "leopardaelectric/other-repo")], True))
+                         ([("pr", None, "leopardaelectric/other-repo"), ("pr", self.session, None)], True))
         self.assertEqual(plan({"owner": "leopardaelectric", "repo": "session-repo"}), ([("pr", self.session, None)], True))
-        self.assertEqual(plan({"owner": "someone", "repo": "else"}), ([("pr", None, None)], True))
+        self.assertEqual(plan({"owner": "someone", "repo": "else"}), ([("pr", self.session, None)], True))
         self.assertEqual(plan({"title": "no owner"}), ([("pr", self.session, None)], True))
 
 
@@ -164,8 +171,7 @@ class UnionPlans(TempDirs):
     """Anything else: the session's checkout and every checkout named, never fewer."""
 
     def assertUnion(self, command: str, kind: str, named: list[str] | None = None) -> list:
-        plan, followed = self.plan(command)
-        self.assertFalse(followed, command)
+        plan, _ = self.plan(command)
         judged = [d for k, d, held in plan if k == kind and not held]
         self.assertEqual(judged, [self.session] + (named or []), command)
         return plan
@@ -245,9 +251,9 @@ class UnionPlans(TempDirs):
         self.assertUnion(f"git commit -m 'then {PR}'", "pr")
         self.assertUnion("echo git push", "push")
 
-    def test_any_exception_in_the_parser_falls_back_to_the_union(self) -> None:
-        with mock.patch.object(vs, "simple_calls", side_effect=KeyError("boom")):
-            self.assertUnion(f"cd {self.other} && git push", "push", [self.other])
+    def test_review_mixed_push_and_pr_gates_both(self) -> None:
+        plan = self.assertUnion(f"git -C {self.other} push && {PR}", "push", [self.other])
+        self.assertEqual([d for k, d, _ in plan if k == "pr"], [self.session, self.other])
 
 
 class Hook(TempDirs):
@@ -262,7 +268,7 @@ class Hook(TempDirs):
     def gated(self, command: str, deny_first: bool = False) -> list[tuple[str, str, bool]]:
         calls = []
 
-        def record(kind: str, top: str, session: str, tool_input: dict, followed: bool) -> bool:
+        def record(kind: str, top: str, session: str, tool_input: dict, followed: bool, timeout: float) -> bool:
             calls.append((kind, top, followed))
             return deny_first
 
@@ -282,8 +288,10 @@ class Hook(TempDirs):
     def test_every_push_and_pr_target_is_gated(self) -> None:
         self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
         self.git_repo(self.other, "https://github.com/leopardaelectric/other-repo.git")
+        self.assertEqual(self.gated(f"git -C {self.other} push"), [("push", self.other, True)])
         self.assertEqual(self.gated(f"git -C {self.other} push && {PR}"),
-                         [("push", self.other, True), ("pr", self.session, True)])
+                         [("push", self.session, False), ("push", self.other, False),
+                          ("pr", self.session, False), ("pr", self.other, False)])
         self.assertEqual(self.gated(f"bash -c 'cd {self.other} && git push && {PR}'"),
                          [("push", self.session, False), ("push", self.other, False),
                           ("pr", self.session, False), ("pr", self.other, False)])
@@ -291,18 +299,39 @@ class Hook(TempDirs):
     def test_first_deny_wins(self) -> None:
         self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
         self.git_repo(self.other, "https://github.com/leopardaelectric/other-repo.git")
-        self.assertEqual(self.gated(f"git -C {self.other} push && {PR}", deny_first=True), [("push", self.other, True)])
+        self.assertEqual(self.gated(f"git -C {self.other} push && {PR}", deny_first=True),
+                         [("push", self.session, False)])
 
     def test_one_gate_per_checkout(self) -> None:
         self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
         os.makedirs(os.path.join(self.session, "sub"))
         self.assertEqual(self.gated(f"bash -c 'cd {self.session}/sub && git push'"), [("push", self.session, False)])
 
-    def test_an_exception_in_the_target_logic_gates_the_session(self) -> None:
+    def test_any_exception_holds_the_call(self) -> None:
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git", commit=True)
+        for target in ("gate_plan", "load", "secret_hits"):
+            with mock.patch.object(vs, "secret_hits", return_value=[]), \
+                    mock.patch.object(vs, target, side_effect=RuntimeError("boom")), \
+                    mock.patch.object(vs, "default_base", return_value="0" * 40), \
+                    mock.patch.object(vs, "claude_security_installed", return_value=True):
+                decision = self.run_hook(f"{PR} --fill")
+            self.assertEqual(decision["permissionDecision"], "deny", target)
+            self.assertIn("couldn't complete (RuntimeError: boom)", decision["permissionDecisionReason"], target)
+
+    def test_running_out_of_time_holds_the_call(self) -> None:
         self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
-        with mock.patch.object(vs, "gate_plan", side_effect=RuntimeError("boom")):
-            self.assertEqual(self.gated(f"cd {self.other} && git push && {PR}"),
-                             [("push", self.session, False), ("pr", self.session, False)])
+        self.git_repo(self.other, "https://github.com/leopardaelectric/other-repo.git")
+        clock = iter([0, 150, 195])
+        timeouts = []
+
+        def record(kind: str, top: str, session: str, tool_input: dict, followed: bool, timeout: float) -> bool:
+            timeouts.append(timeout)
+            return False
+
+        with mock.patch.object(vs.time, "monotonic", lambda: next(clock)), mock.patch.object(vs, "gate_checkout", record):
+            decision = self.run_hook(f"git push && git -C {self.other} push")
+        self.assertEqual(timeouts, [50])
+        self.assertIn("more checkouts than can be checked in one call", decision["permissionDecisionReason"])
 
     def test_a_command_with_nothing_gated_exits_before_any_git_call(self) -> None:
         with mock.patch.object(vs, "git", side_effect=AssertionError("git called")):
@@ -312,12 +341,12 @@ class Hook(TempDirs):
         self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git", commit=True)
         with mock.patch.object(vs, "secrets_gate", return_value=False), \
                 mock.patch.object(vs, "claude_security_installed", return_value=True):
-            union = self.run_hook(f"bash -c '{PR} --fill'")["permissionDecisionReason"]
+            union = self.run_hook(f"bash -c 'cd {self.other} && {PR} --fill'")["permissionDecisionReason"]
             followed = self.run_hook(f"{PR} --fill")["permissionDecisionReason"]
         self.assertIn("has not been scanned", union)
-        self.assertIn("This command's shape isn't one the gate follows", union)
+        self.assertIn("This command isn't one of the forms the gate follows exactly", union)
         self.assertNotIn("checkout at", union)
-        self.assertNotIn("This command's shape", followed)
+        self.assertNotIn("forms the gate follows", followed)
 
 
 class HooksJson(unittest.TestCase):
