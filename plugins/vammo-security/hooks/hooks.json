@@ -1,5 +1,5 @@
 {
-  "description": "Two deterministic gates. Before git push: TruffleHog on the commits being pushed. Before a pull request (gh pr create, or a GitHub MCP create_pull_request tool): TruffleHog on the branch, then a claude-security scan of HEAD must exist, or Claude is told to run the pre-pr-security skill first.",
+  "description": "Two deterministic gates. Before git push: TruffleHog on the commits being pushed. Before a pull request (gh pr create, a gh api call to pulls, a GraphQL createPullRequest, or a GitHub MCP create_pull_request tool): TruffleHog on the branch, then a claude-security scan of HEAD must exist, or Claude is told to run the pre-pr-security skill first. The script runs on every Bash call and exits at once when the command's text has no push or PR creation; it fails closed, so text that only mentions one also triggers the gate.",
   "hooks": {
     "PreToolUse": [
       {
@@ -7,13 +7,6 @@
         "hooks": [
           {
             "type": "command",
-            "if": "Bash(gh pr create *)",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/vammo_security.py\" hook",
-            "timeout": 240
-          },
-          {
-            "type": "command",
-            "if": "Bash(git push *)",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/vammo_security.py\" hook",
             "timeout": 240
           }

@@ -24,7 +24,7 @@
       "name": "vammo-security",
       "source": "./plugins/vammo-security",
       "description": "Security gates for Claude Code: TruffleHog secret checks before git push and PR, plus a claude-security scan of the branch with verified fixes before the PR is opened.",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "dependencies": [
         {
           "name": "claude-security",
