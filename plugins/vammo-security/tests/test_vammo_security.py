@@ -76,7 +76,8 @@ class Detect(unittest.TestCase):
         for command in (f"{PR} --fill", PR_REPO_FIRST, "gh -R leopardaelectric/x pr create",
                         f"os.system('{PR}')", "gh api repos/o/n/pulls", "gh api repos/o/n/pulls -X GET",
                         "gh api repos/o/n/pulls/12/comments", "EP=repos/o/n/pulls; gh api \"$EP\"",
-                        "gh api graphql -f query='mutation{createPullRequest(input:{})}'"):
+                        "gh api graphql -f query='mutation{createPullRequest(input:{})}'",
+                        "gh pr new --fill", "gh -R x pr new"):
             self.assertKinds(command, {"pr"})
 
     def test_text_that_only_mentions_the_commands_triggers_the_gate(self) -> None:
@@ -143,6 +144,8 @@ class ExactForms(TempDirs):
             f"GIT_DIR={self.session}/.git git -C {o} push", f"git -C {o} push\ngit push", f"git -C {o} push & git push",
             f"git -C {o}/missing push", f"git -C {self.root} push", f"{PR} --fill",
             f"cd {o} && gh api repos/leopardaelectric/other-repo/pulls -X POST --input b.json",
+            f"cd {o} && {PR} -dR leopardaelectric/x", f"cd {o} && {PR} -fwRleopardaelectric/x",
+            f"cd {o} && gh pr new --fill",
         ):
             self.assertNotExact(command)
 
@@ -176,6 +179,14 @@ class UnionPlans(TempDirs):
         self.assertEqual(judged, [self.session] + (named or []), command)
         return plan
 
+    def assertJudged(self, command: str, kind: str, named: list[str]) -> None:
+        """The session's checkout first, and every one of named somewhere after it."""
+        plan, _ = self.plan(command)
+        judged = [d for k, d, held in plan if k == kind and not held]
+        self.assertEqual(judged[:1], [self.session], command)
+        for d in named:
+            self.assertIn(d, judged, command)
+
     def test_review_shell_options_here_strings_heredocs_and_backticks(self) -> None:
         o = self.other
         self.assertUnion("bash -euo pipefail -c 'git push'", "push")
@@ -203,6 +214,30 @@ class UnionPlans(TempDirs):
         self.assertUnion("cd sub && git push", "push", [os.path.join(self.session, "sub")])  # may follow CDPATH
         self.assertUnion(f"env -C {o} git push", "push", [o])
         self.assertUnion(f"builtin cd {o}; git push", "push", [o])
+
+    def test_review_cd_options_quoting_escapes_and_chdir(self) -> None:
+        o = self.other
+        spaced = os.path.join(self.root, "my repo")
+        os.makedirs(spaced)
+        self.assertJudged(f"cd -- {o} && git push && echo", "push", [o])
+        self.assertJudged(f"cd -P {o} && git push && echo", "push", [o])
+        self.assertJudged(f"pushd -q {o} && git push", "push", [o])
+        self.assertJudged(f"chdir {o} && git push", "push", [o])
+        with mock.patch.dict(os.environ, {"XB": self.root}):
+            self.assertJudged("cd \"$XB\"/other && git push && echo", "push", [o])
+        self.assertJudged(f"cd '{self.root}'/other && git push && echo", "push", [o])
+        self.assertJudged(f"cd {self.root}/my\\ repo && git push && echo", "push", [spaced])
+
+    def test_review_every_value_of_a_variable_and_cdpath(self) -> None:
+        o = self.other
+        self.assertJudged(f"D={o}; git -C $D push; D={self.session}", "push", [o])
+        with mock.patch.dict(os.environ, {"CDPATH": self.root}):
+            self.assertJudged("cd other && git push && echo", "push", [o])
+
+    def test_review_bundled_repo_flags_are_held(self) -> None:
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
+        plan = self.assertUnion(f"{PR} -dR leopardaelectric/x", "pr")
+        self.assertIn(("pr", None, "leopardaelectric/x"), plan)
 
     def test_review_heredoc_expansions_and_interpreter_stdin(self) -> None:
         self.assertUnion("cat <<EOF\n$(git push origin HEAD)\nEOF", "push")
@@ -317,6 +352,12 @@ class Hook(TempDirs):
                 decision = self.run_hook(f"{PR} --fill")
             self.assertEqual(decision["permissionDecision"], "deny", target)
             self.assertIn("couldn't complete (RuntimeError: boom)", decision["permissionDecisionReason"], target)
+
+    def test_a_git_timeout_holds_the_call(self) -> None:
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
+        with mock.patch.object(vs, "git", side_effect=vs.subprocess.TimeoutExpired("git", 10)):
+            decision = self.run_hook("git push")
+        self.assertIn("couldn't complete (TimeoutExpired", decision["permissionDecisionReason"])
 
     def test_running_out_of_time_holds_the_call(self) -> None:
         self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
@@ -433,6 +474,11 @@ class Install(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), self.body)
         self.assertTrue(os.access(self.target, os.X_OK))
         self.assertEqual(self.leftovers(), [])
+
+    def test_download_stops_at_the_deadline(self) -> None:
+        with mock.patch.object(vs, "_deadline", time.monotonic() - 1), self.assertRaises(RuntimeError):
+            vs.download_trufflehog(self.target)
+        self.assertFalse(self.target.exists())
 
     def test_failed_rename_is_fine_when_the_binary_is_already_there(self) -> None:
         self.target.parent.mkdir(parents=True)

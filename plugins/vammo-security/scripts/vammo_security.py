@@ -4,7 +4,7 @@
 Two PreToolUse gates, both deterministic: no model runs inside this script.
 
 - Before `git push`: TruffleHog runs on the commits being pushed. A secret holds the push.
-- Before a pull request is created (`gh pr create`, a `gh api` call to `.../pulls`, a GraphQL
+- Before a pull request is created (`gh pr create` or `gh pr new`, a `gh api` call to `.../pulls`, a GraphQL
   `createPullRequest`, or a GitHub MCP `create_pull_request` tool), two checks run:
   1. TruffleHog runs on the branch's commits. A secret holds the PR.
   2. The branch's HEAD must be "covered": it was scanned by the claude-security plugin, or
@@ -55,6 +55,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -155,18 +156,35 @@ def release_asset() -> str | None:
     return f"trufflehog_{TRUFFLEHOG_VERSION}_{osname}_{arch}.tar.gz"
 
 
+# When the running hook must be done by (time.monotonic()); run_gates sets it.
+_deadline = float("inf")
+
+
+def fetch(url: str) -> bytes:
+    """url's body, read in chunks so a slow download can't outlast the hook."""
+    import urllib.request  # here, not at the top: it adds ~80 ms to every hook start
+
+    chunks = []
+    with urllib.request.urlopen(url, timeout=30) as response:
+        while chunk := response.read(1 << 16):
+            if time.monotonic() > _deadline:
+                raise RuntimeError("ran out of time downloading it")
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def download_trufflehog(target: Path) -> None:
-    import io, tarfile, urllib.request  # here, not at the top: they add ~80 ms to every hook start
+    import io, tarfile  # here, not at the top: they add to every hook start
 
     asset = release_asset()
     if not asset:
         raise RuntimeError(f"no TruffleHog release for {sys.platform}/{platform.machine()}")
     base = f"{TRUFFLEHOG_RELEASES}/v{TRUFFLEHOG_VERSION}"
-    sums = urllib.request.urlopen(f"{base}/trufflehog_{TRUFFLEHOG_VERSION}_checksums.txt", timeout=30).read().decode()
+    sums = fetch(f"{base}/trufflehog_{TRUFFLEHOG_VERSION}_checksums.txt").decode()
     expected = next((line.split()[0] for line in sums.splitlines() if line.strip().endswith(asset)), None)
     if not expected:
         raise RuntimeError(f"{asset} is not in the release checksums")
-    blob = urllib.request.urlopen(f"{base}/{asset}", timeout=120).read()
+    blob = fetch(f"{base}/{asset}")
     if hashlib.sha256(blob).hexdigest() != expected:
         raise RuntimeError(f"checksum mismatch for {asset}; refusing to install it")
     with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tf:
@@ -215,6 +233,9 @@ def trufflehog_bin() -> str:
 def secret_hits(top: str, base: str, timeout: float = 100) -> list[dict]:
     """Secrets TruffleHog finds in the commits base..HEAD. Raises ScannerUnavailable."""
     binary = trufflehog_bin()
+    timeout = min(timeout, _deadline - time.monotonic())
+    if timeout <= 0:
+        raise ScannerUnavailable("no time left to run TruffleHog in this hook call")
     cmd = [binary, "git", f"file://{top}", "--json", "--no-update",
            "--since-commit", base, "--branch", "HEAD", "--config", str(PLUGIN_ROOT / "config" / "trufflehog.yaml")]
     try:
@@ -337,7 +358,7 @@ def detect(command: str) -> set[str]:
             kinds.add("push")
         elif name == "gh":
             pr = then(i, "pr")
-            if (pr is not None and then(pr, "create") is not None) or \
+            if (pr is not None and (then(pr, "create") is not None or then(pr, "new") is not None)) or \
                     (then(i, "api") is not None and PULLS_TEXT.search(command)):
                 kinds.add("pr")
     if GRAPHQL_PR_TEXT.search(command):
@@ -397,7 +418,7 @@ def exact_target(command: str, cwd: str) -> tuple[str, str] | None:
         directory = os.path.realpath(os.path.normpath(os.path.join(cwd, path)))
         if rest[:2] == ["git", "push"]:
             kind = "push"
-        elif rest[:3] == ["gh", "pr", "create"] and not any(a.startswith(("-R", "--repo")) for a in rest[3:]):
+        elif rest[:3] == ["gh", "pr", "create"] and not any(REPO_FLAG.match(a) for a in rest[3:]):
             kind = "pr"
         else:
             return None
@@ -415,37 +436,71 @@ def exact_target(command: str, cwd: str) -> tuple[str, str] | None:
     return (kind, top) if top else None
 
 
-# Any directory the text names after cd/pushd/-C/--git-dir/--work-tree/GIT_DIR/GIT_WORK_TREE.
+# Any directory the text names after cd/pushd/chdir/-C/--git-dir/--work-tree/GIT_DIR/GIT_WORK_TREE.
 _START = r"(?<![\w.-])"
-_NAMES_DIR = r"(?:cd|pushd|-C|--git-dir|--work-tree|GIT_DIR|GIT_WORK_TREE)"
+_NAMES_DIR = r"(?:cd|pushd|chdir|-C|--git-dir|--work-tree|GIT_DIR|GIT_WORK_TREE)"
 NAMED_PATH = re.compile(rf"""{_START}{_NAMES_DIR}(?:=|[\s"',\\\[\]]+)([^\s"',\\\[\];&|<>`()]+)""")
 NAMED_QUOTED_PATH = re.compile(rf"""{_START}{_NAMES_DIR}(?:=|\s+)(?:"([^"]+)"|'([^']+)')""")
+CD_COMMANDS = {"cd", "pushd", "chdir"}
 ASSIGNMENT_TEXT = re.compile(r"""(?<![\w$])([A-Za-z_]\w*)=(?:"([^"]*)"|'([^']*)'|([^\s;&|<>`()]+))""")
-REPO_TEXT = re.compile(rf"""{_START}(?:-R|--repo|GH_REPO)(?:=|[\s"']+)?([^\s"';&|<>`()]+)|"""
+# gh's short flags bundle, with the value flag last: `-dR owner/name` is `-d -R owner/name`.
+REPO_FLAG = re.compile(r"-[A-Za-z]*R|--repo")
+REPO_TEXT = re.compile(rf"""{_START}(?:-[A-Za-z]*R|--repo|GH_REPO)(?:=|[\s"']+)?([^\s"';&|<>`()]+)|"""
                        r"""repos/([^\s/"'`]+)/([^\s/"'`]+)/""")
 GITHUB_REMOTE = re.compile(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", re.IGNORECASE)
 REPO_SPEC = re.compile(r"([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
 VAMMO_OWNER = "leopardaelectric"
 
 
+def named_paths(command: str) -> list[str]:
+    """Every path the command names: the raw text matches of NAMED_PATH (quoted code and heredoc
+    bodies count), plus, when the line splits into shell words, the word after cd/pushd/chdir
+    (past their options), -C, --git-dir or --work-tree, and the value of GIT_DIR=/GIT_WORK_TREE=.
+    Shell words join quoted parts and drop escapes (`"$HOME"/x`, `a\\ b`)."""
+    paths = [m.group(1) for m in NAMED_PATH.finditer(command)] + \
+        [m.group(1) or m.group(2) for m in NAMED_QUOTED_PATH.finditer(command)]
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()<>")
+        lexer.whitespace_split = True
+        words = list(lexer)
+    except ValueError:
+        return paths
+    for i, word in enumerate(words):
+        name, eq, value = word.partition("=")
+        if word in CD_COMMANDS:
+            j = i + 1
+            while j < len(words) and words[j].startswith("-") and words[j] != "-":
+                j += 1
+            paths += words[j:j + 1]
+        elif word in ("-C", "--git-dir", "--work-tree"):
+            paths += words[i + 1:i + 2]
+        elif eq and name in ("GIT_DIR", "GIT_WORK_TREE", "--git-dir", "--work-tree"):
+            paths.append(value)
+    return paths
+
+
 def named_dirs(command: str, cwd: str) -> list[str]:
-    """The session's directory, then every existing directory the command names (see NAMED_PATH),
-    with variables the command assigns, then the environment's, expanded; each both as written
-    and with its symlinks resolved."""
-    assigned = {m.group(1): next(g for g in m.groups()[1:] if g is not None) for m in ASSIGNMENT_TEXT.finditer(command)}
-    raw = [(m.start(), m.group(1)) for m in NAMED_PATH.finditer(command)] + \
-        [(m.start(), m.group(1) or m.group(2)) for m in NAMED_QUOTED_PATH.finditer(command)]
+    """The session's directory, then every existing directory the command names (named_paths),
+    with each value the command assigns to a variable, then the environment's, expanded; each
+    both as written and with its symlinks resolved, and also under every CDPATH entry."""
+    assigned: dict[str, set[str]] = {}
+    for m in ASSIGNMENT_TEXT.finditer(command):
+        assigned.setdefault(m.group(1), set()).add(next(g for g in m.groups()[1:] if g is not None))
     dirs = [cwd]
-    for _, path in sorted(raw):
-        for name, value in sorted(assigned.items(), key=lambda item: -len(item[0])):
-            path = path.replace(f"${{{name}}}", value).replace(f"${name}", value)
-        path = os.path.expanduser(os.path.expandvars(path))
-        for base in list(dirs):
-            joined = os.path.join(base, path)
-            for full in (os.path.normpath(joined), os.path.realpath(joined)):
-                found = os.path.dirname(full) if os.path.basename(full) == ".git" and os.path.exists(full) else full
-                if os.path.isdir(found) and found not in dirs:
-                    dirs.append(found)
+    cdpath = [p for p in os.environ.get("CDPATH", "").split(":") if p]
+    for path in named_paths(command):
+        variants = {path}
+        for name, values in sorted(assigned.items(), key=lambda item: -len(item[0])):
+            variants = {v.replace(f"${{{name}}}", value).replace(f"${name}", value)
+                        for v in variants for value in values}
+        for variant in variants:
+            variant = os.path.expanduser(os.path.expandvars(variant))
+            for base in dirs[:] + cdpath:
+                joined = os.path.join(base, variant)
+                for full in (os.path.normpath(joined), os.path.realpath(joined)):
+                    found = os.path.dirname(full) if os.path.basename(full) == ".git" and os.path.exists(full) else full
+                    if os.path.isdir(found) and found not in dirs:
+                        dirs.append(found)
     return dirs
 
 
@@ -541,7 +596,7 @@ def secrets_gate(top: str, gate: str, base: str | None, timeout: float) -> bool:
 def toplevel(directory: str) -> str | None:
     try:
         return os.path.realpath(git(directory, "rev-parse", "--show-toplevel"))
-    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+    except RuntimeError:  # git answered: not a checkout. A timeout or a missing git holds the call.
         return None
 
 
@@ -583,7 +638,8 @@ def cmd_hook() -> int:
 
 def run_gates(kinds: set[str], tool_name: str, tool_input: dict, cwd: str, gate: str) -> None:
     """Runs every step of the call's plan until one denies it."""
-    deadline = time.monotonic() + HOOK_DEADLINE
+    global _deadline
+    deadline = _deadline = time.monotonic() + HOOK_DEADLINE
     plan, followed = gate_plan(kinds, tool_name, tool_input, cwd)
     judged = set()
     for kind, directory, unresolved in plan:
@@ -616,7 +672,7 @@ def gate_checkout(kind: str, directory: str, session_dir: str, tool_input: dict,
     try:
         top = git(directory, "rev-parse", "--show-toplevel")
         head = git(directory, "rev-parse", "HEAD")
-    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+    except RuntimeError:
         return False  # not a git checkout: nothing to check
     if not is_vammo_repo(top):
         return False
