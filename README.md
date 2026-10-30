@@ -130,6 +130,8 @@ claude plugin install vammo-security@vammo
 
 claude-security is a declared dependency from `claude-plugins-official`, so it is installed with the plugin. The marketplace allows that cross-marketplace dependency. Restart Claude Code afterwards. For the whole organization, add `"vammo-security@vammo": true` to `enabledPlugins` in the managed settings shown above.
 
+The gates judge the repository the command targets, not the one the session was opened in: `cd <dir> && gh pr create` checks `<dir>`, and `git -C <dir> push` scans `<dir>`. A command that only mentions them, quoted or in a heredoc, doesn't trigger a gate. Inline code an interpreter runs (`python3 -c`, `node -e`, `perl -e`, `ruby -e`, `php -r`) does when it contains them, and the directory the interpreter runs in is checked. A `gh api` POST to `repos/<owner>/<name>/pulls` counts as opening a PR. A PR for another Vammo repository whose checkout the session can't resolve (`gh pr create -R`, the `gh api` endpoint's owner and name, or a GitHub MCP tool's owner and repo) is held, with instructions to open it from that repository's checkout so its own HEAD is checked.
+
 Scope and exceptions:
 
 - It runs in every repository with a remote on `github.com/leopardaelectric`, and in no other.
