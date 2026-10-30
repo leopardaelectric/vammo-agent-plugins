@@ -37,6 +37,57 @@ these short pointers do not replace their explanations or the dictionary.
 A mechanical count alone cannot establish fidelity or approved vocabulary. A technical literal
 does not make all surrounding jargon approved terminology.
 
+## Edit the complete draft before delivery
+
+For every English artifact, make a final pass over the actual draft, not just the source or an
+earlier response:
+
+1. Check every ordinary word in the title, headings, body and criteria against the official
+   dictionary: approval, meaning, part of speech and form. Consult the official manual through
+   the host's permitted source access. A locally supplied official manual is also a source; this
+   skill does not install or redistribute it. Record unsupported technical-term exceptions in
+   separate review evidence. A word is not verified merely because it sounds clear.
+2. Rewrite unapproved ordinary prose. Source prose does not grant vocabulary approval. A short
+   title also needs this edit. Keep exact labels and quoted evidence literal; they do not exempt
+   the surrounding prose. Preserve the actor and the strength of every condition and obligation.
+3. Check verb constructions and prerequisite order, then compare all facts with the source again.
+   Use finite verbs for ordinary actions: a **When + actor + verb** clause can describe the action
+   before its result. Ordinary forms such as “without showing” still need a rewrite. Apply the
+   technical-noun exceptions only when their category and subject-field usage are supported.
+
+These are known pitfalls within that pass. The alternatives were checked in the Issue 9 dictionary
+for the indicated parts of speech. Recast these ordinary forms when they occur in editable prose;
+choose an alternative only when its approved meaning fits. This table is neither the STE dictionary
+nor a complete vocabulary check.
+
+| Unapproved ordinary form | Rewrite direction |
+| --- | --- |
+| attempt (noun) | Use **try** as a verb and keep the number of times. |
+| preserve (verb) | Use **keep** as a verb when something must remain as supplied. |
+| create (verb) | Use **make** as a verb when its approved meaning fits the required result. |
+| investigate (verb) | State the question with **find** as a verb; an inconclusive result remains possible. |
+| repeated (adjective) | Describe the same event and how many times it occurs. Keep unknown counts unknown. |
+| alter (verb) | Use **change** as a verb. |
+| comparison (noun) | Rebuild the sentence with **compare** as a verb; retain whether the work is complete. |
+
+Then check these constructions:
+
+- Rule 3.5 restricts verb forms ending in `-ing` to technical nouns and their modifiers. For an
+  ordinary action, use a finite verb or an instruction. Describe what the user does and what the
+  system shows. Exact labels and eligible technical nouns are separate cases; do not rewrite them
+  just because their spelling ends in `-ing`.
+- Rule 5.4 puts a required condition before the command. For example: “When the list is available,
+  start the work.” Keep the prerequisite, its source and any prohibition on an earlier start.
+  A dependency must not become a promise that its input has arrived.
+- A business or software context does not approve every ordinary verb or noun as a technical term.
+  Check the technical category and actual company, industry or subject-field usage. Keep a term
+  only with that basis; an unverified exception stays unverified in review evidence.
+
+After these edits, compare the draft with the source again. Grammar changes must preserve
+obligations, permissions, unknowns and literals. Do not add an STE review note to the card or to
+an ordinary draft-only response. If the person asks for a language audit, report the checked
+rules, vocabulary and remaining limits separately.
+
 ## Preserve the claim
 
 Synthetic source: “You must not start the test while `check_state=WAITING`.

@@ -12,6 +12,9 @@ nem uma tradução do dicionário normativo inglês. Português é permitido ime
 - Prefira verbos concretos: “verificar”, em vez de “realizar a verificação”.
 - Use Markdown para separar informações que o leitor precisa comparar ou executar.
   Não crie seções vazias nem repita projeto, responsável ou prioridade já presentes nos campos.
+  Na entrega, mostre apenas o conteúdo pedido. Um rótulo como “Projeto (campo nativo)” e um
+  resumo antes do rascunho também repetem metadados. Conserve uma dependência de outro projeto
+  quando ela define a entrada necessária ou a condição para começar.
 - Preserve literais: `bin_code`, `LOTE-A`, comandos, rotas e mensagens de erro.
 - Mantenha a força do texto: “precisa” expressa obrigação; “não pode”, proibição;
   “pode”, permissão; “recomendo”, sugestão. Não troque uma pela outra para encurtar.

@@ -93,14 +93,23 @@ criteria, triage question or progress note. For explicit invocation, use
 `$vammo-work-tracker-writing` in Codex.
 
 English is recommended for new cards without a language choice. Explicit language requests win;
-revisions preserve the existing language. Portuguese is accepted immediately and uses an identified
-clarity adaptation of ASD-STE100. English uses the official English standard, with rule and
-dictionary verification recorded separately from card text. No template or language rule blocks intake.
+revisions preserve the existing language. A Portuguese conversation or source notes alone do not
+choose the new card's language; an explicit request such as “em português” does. Portuguese is
+accepted immediately and uses an identified clarity adaptation of ASD-STE100. English uses the official
+English standard, with rule and dictionary verification recorded separately from card text. No template
+or language rule blocks intake.
+The English guide requires a per-artifact word/form/construction review using permitted access to
+the official manual. Its editing examples do not replace that manual, which is not bundled. If
+normative access is unavailable, drafting continues with verification pending; no compliance claim follows.
 
 The writing skill can draft in a folder with tracking off. A draft does not authorize saving,
 submission or session tracking. Progress notes add to human descriptions and criteria. The hook
 only supplies a reminder; discovery, loading, hook execution and behavior are separate checks.
 Native trust or managed policy can prevent the local candidate from loading.
+Native project, owner, priority, type and status already supplied by the host stay outside the
+entire draft delivery, including separate metadata blocks, introductions and recaps. Keep an
+actionable dependency on another project. A comparison does not add a purchase decision; an
+observation-only progress note does not add instructions from the existing criteria.
 
 After an authorized release, update and restart:
 
