@@ -1,4 +1,5 @@
-"""Unit tests for vammo_security.py: which checkout a call targets, the TruffleHog install, state saves.
+"""Unit tests for vammo_security.py: which calls are gated, which checkouts they are judged on,
+the TruffleHog install and state saves.
 
 Run: python3 -m unittest discover -s plugins/vammo-security/tests -v
 No network: downloads are served by a fake urlopen.
@@ -13,17 +14,22 @@ import os
 import subprocess
 import tarfile
 import tempfile
+import time
 import unittest
 import urllib.request
 from pathlib import Path
 from unittest import mock
 
-SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "vammo_security.py"
+PLUGIN = Path(__file__).resolve().parent.parent
+SCRIPT = PLUGIN / "scripts" / "vammo_security.py"
 spec = importlib.util.spec_from_file_location("vammo_security", SCRIPT)
 vs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(vs)
 
 PR = "gh " + "pr " + "create"
+PR_REPO_FIRST = "gh " + "pr --repo leopardaelectric/x " + "create"
+GIT_ENV = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
 
 
 def bash(command: str) -> dict:
@@ -42,189 +48,227 @@ class TempDirs(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def git_repo(self, path: str, remote: str) -> None:
-        subprocess.run(["git", "init", "-q", path], check=True)
-        subprocess.run(["git", "-C", path, "remote", "add", "origin", remote], check=True)
+    def git_repo(self, path: str, remote: str, commit: bool = False) -> None:
+        subprocess.run(["git", "init", "-q", path], check=True, env=GIT_ENV)
+        subprocess.run(["git", "-C", path, "remote", "add", "origin", remote], check=True, env=GIT_ENV)
+        if commit:
+            subprocess.run(["git", "-C", path, "commit", "-q", "--allow-empty", "-m", "c"], check=True, env=GIT_ENV)
+
+    def plan(self, command: str) -> tuple[list, bool]:
+        return vs.gate_plan(vs.detect(command), "Bash", bash(command), self.session)
 
 
-class Classify(TempDirs):
-    def kind(self, command: str) -> str | None:
-        return vs.classify("Bash", bash(command))
+class Detect(unittest.TestCase):
+    def assertKinds(self, command: str, kinds: set[str]) -> None:
+        self.assertEqual(vs.detect(command), kinds, command)
 
-    def test_direct_commands(self) -> None:
-        self.assertEqual(self.kind(f"{PR} --fill"), "pr")
-        self.assertEqual(self.kind("git push origin br"), "push")
-        self.assertEqual(self.kind("git -C x push"), "push")
-        self.assertEqual(self.kind("git -c core.x=1 --no-pager push"), "push")
+    def test_push_with_widened_boundaries_and_global_options(self) -> None:
+        for command in ("git push origin br", "git -C x push", "git -c core.x=1 --no-pager push",
+                        "git --git-dir=x/.git push", "git --work-tree x push", "git -C \"a b\" push",
+                        "/usr/bin/git push", "\"git\" \"push\"", "echo $(git push)", "x=`git push`",
+                        "{git,push}", "! git push", "subprocess.run(['git', '-C', d, 'push'])",
+                        "git \\\n  push", "git -C $(pwd) push"):
+            self.assertKinds(command, {"push"})
 
-    def test_wrapped_commands(self) -> None:
-        self.assertEqual(self.kind("heavy-lock.sh run 'label' -- git -C x push origin br"), "push")
-        self.assertEqual(self.kind("FOO=1 timeout 60 git push"), "push")
-        self.assertEqual(self.kind(f"echo \"$({PR} --fill)\""), "pr")
-        self.assertEqual(self.kind(f"bash -c 'cd x && {PR} --fill'"), "pr")
-        self.assertEqual(self.kind(f"bash <<'EOF'\n{PR} --fill\nEOF"), "pr")
+    def test_pr_creation_forms(self) -> None:
+        for command in (f"{PR} --fill", PR_REPO_FIRST, "gh -R leopardaelectric/x pr create",
+                        f"os.system('{PR}')", "gh api repos/o/n/pulls", "gh api repos/o/n/pulls -X GET",
+                        "gh api repos/o/n/pulls/12/comments", "EP=repos/o/n/pulls; gh api \"$EP\"",
+                        "gh api graphql -f query='mutation{createPullRequest(input:{})}'"):
+            self.assertKinds(command, {"pr"})
 
-    def test_pr_body_from_heredoc_is_still_a_pr(self) -> None:
-        self.assertEqual(self.kind(f"{PR} --title t --body \"$(cat <<'EOF'\n## Summary\nx\nEOF\n)\""), "pr")
+    def test_text_that_only_mentions_the_commands_triggers_the_gate(self) -> None:
+        # Decision R3: mentions are an accepted false positive, so nothing that runs can slip by.
+        self.assertKinds(f"cat <<'EOF' > notes.txt\nthen run {PR} --base main\nEOF", {"pr"})
+        self.assertKinds(f"python3 -c 'print(1)' --label ' {PR} '", {"pr"})
+        self.assertKinds(f"git commit -m 'then {PR} and git push'", {"pr", "push"})
 
-    def test_text_that_only_mentions_the_commands(self) -> None:
-        self.assertIsNone(self.kind(f"python3 - <<'EOF'\nprint(\"{PR}\")\n{PR} --fill\nEOF"))
-        self.assertIsNone(self.kind(f"cat <<-EOF > notes.txt\n\trun {PR} then git push\n\tEOF"))
-        self.assertIsNone(self.kind(f"git commit -m \"$(cat <<'EOF'\nthen {PR}\nEOF\n)\""))
-        self.assertIsNone(self.kind(f"grep -rn '{PR}' . && git log --grep 'git push'"))
-        self.assertIsNone(self.kind("git status && gh pr view 12"))
+    def test_calls_that_are_not_gated(self) -> None:
+        for command in ("git status && gh pr view 12", "ls -la", "git commit -m 'push it'",
+                        "gh api repos/o/n/issues -X POST", "node -e 'x(\"gh pr view; git pushd\")'",
+                        "github pr create", "git log --oneline"):
+            self.assertKinds(command, set())
 
-    def test_unparseable_falls_back_to_the_text_match(self) -> None:
-        self.assertEqual(self.kind(f"{PR} --title \"unbalanced"), "pr")
-        self.assertEqual(self.kind("cat <<EOF\nnever ends && git push"), "push")
-        with self.assertRaises(ValueError):
-            vs.gated_calls(f"{PR} --title \"unbalanced", self.session)
-
-    def test_mcp_tool(self) -> None:
-        self.assertEqual(vs.classify("mcp__github__create_pull_request", {}), "pr")
-        self.assertIsNone(vs.classify("mcp__github__list_pull_requests", {}))
-
-    def test_interpreter_inline_code_runs_the_commands(self) -> None:
-        self.assertEqual(self.kind(f"python3 -c \"import os; os.system('{PR} --fill')\""), "pr")
-        self.assertEqual(self.kind(f"python -c 'import os; os.system(\"{PR}\")'"), "pr")
-        self.assertEqual(self.kind(f"/usr/bin/python3.12 -Ic 'import os; os.system(\"{PR}\")'"), "pr")
-        self.assertEqual(self.kind(f"timeout 9 python3 -c'import os; os.system(\"{PR}\")'"), "pr")
-        self.assertEqual(self.kind("python3 -c 'import subprocess; subprocess.run([\"git\", \"push\"])'"), "push")
-        self.assertEqual(self.kind("python3 -c 'import subprocess; subprocess.run([\"git\", \"-C\", \"x\", \"push\"])'"),
-                         "push")
-        self.assertEqual(self.kind("node -e \"require('child_process').execSync('git push')\""), "push")
-        self.assertEqual(self.kind(f"node --eval 'x(\"{PR}\")'"), "pr")
-        self.assertEqual(self.kind(f"node --eval='x(\"{PR}\")'"), "pr")
-        self.assertEqual(self.kind(f"node -p 'x(\"{PR}\")'"), "pr")
-        self.assertEqual(self.kind(f"node -pe 'x(\"{PR}\")'"), "pr")
-        self.assertEqual(self.kind(f"perl -e 'system(\"{PR}\")'"), "pr")
-        self.assertEqual(self.kind(f"perl -E 'system(\"{PR}\")'"), "pr")
-        self.assertEqual(self.kind("perl -lne 'system(\"git push\")' file"), "push")
-        self.assertEqual(self.kind(f"ruby -e 'system(\"/usr/local/bin/{PR}\")'"), "pr")
-        self.assertEqual(self.kind(f"php -r 'exec(\"{PR}\");'"), "pr")
-
-    def test_interpreter_words_that_are_not_inline_code(self) -> None:
-        self.assertIsNone(self.kind(f"python3 -c 'print(1)' --label ' {PR} '"))
-        self.assertIsNone(self.kind(f"python3 script.py '{PR}'"))
-        self.assertIsNone(self.kind(f"python3 -m pytest -k '{PR}'"))
-        self.assertIsNone(self.kind(f"echo \"python3 -c 'import os; os.system({PR})'\""))
-        self.assertIsNone(self.kind("node -e 'x(\"gh pr view; git pushd\")'"))
-        self.assertIsNone(self.kind("python3 -c 'print(\"github pr create\")'"))
-
-    def test_gh_api_post_to_pulls_is_a_pr(self) -> None:
-        for command in (
-            "gh api repos/o/n/pulls -X POST --input body.json",
-            "gh api /repos/o/n/pulls --method POST -f title=t",
-            "gh api repos/o/n/pulls -XPOST",
-            "gh api repos/o/n/pulls --method=post",
-            "gh api https://api.github.com/repos/o/n/pulls -f title=t -f head=x -f base=main",
-            "gh api repos/o/n/pulls -F draft=true",
-            "gh api repos/o/n/pulls --raw-field title=t",
-            "gh api repos/o/n/pulls --field=title=t",
-            "gh api repos/o/n/pulls --input=- < body.json",
-            "cd x && gh api repos/o/n/pulls/ --input body.json",
-        ):
-            with self.subTest(command=command):
-                self.assertEqual(self.kind(command), "pr")
-
-    def test_gh_api_calls_that_dont_create_a_pr(self) -> None:
-        for command in (
-            "gh api repos/o/n/pulls",
-            "gh api repos/o/n/pulls -X GET -f state=open",
-            "gh api repos/o/n/pulls --method PATCH --input body.json",
-            "gh api repos/o/n/pulls/12 -X PATCH -f state=closed",
-            "gh api repos/o/n/pulls/12/comments -X POST -f body=x",
-            "gh api repos/o/n/issues -X POST -f title=t",
-            "echo 'gh api repos/o/n/pulls -X POST'",
-        ):
-            with self.subTest(command=command):
-                self.assertIsNone(self.kind(command))
-
-    def test_unparseable_gh_api_to_pulls_falls_back_to_a_pr(self) -> None:
-        self.assertEqual(self.kind("gh api repos/o/n/pulls -X POST -f title=\"unbalanced"), "pr")
+    def test_detection_takes_linear_time(self) -> None:
+        text = "echo 'git -C x " * 3000 + "\n" + "word " * 50000 + "gh -R " * 5000 + " git -C '" * 3000
+        start = time.perf_counter()
+        vs.detect(text)
+        self.assertLess(time.perf_counter() - start, 1.0)
 
 
-class Targets(TempDirs):
-    def targets(self, kind: str, command: str) -> list:
-        return vs.gate_targets(kind, "Bash", bash(command), self.session)
+class FollowedPlans(TempDirs):
+    """Plain command lines: the targets are followed exactly."""
 
-    def test_cd_then_pr(self) -> None:
-        self.assertEqual(self.targets("pr", f"cd {self.other} && {PR} --fill"), [(self.other, None)])
-        self.assertEqual(self.targets("pr", f"cd ../other; {PR} --fill"), [(self.other, None)])
+    def assertFollowed(self, command: str, plan: list) -> None:
+        self.assertEqual(self.plan(command), (plan, True), command)
 
-    def test_git_dash_c_push_is_relative_to_the_current_dir(self) -> None:
-        self.assertEqual(self.targets("push", f"git -C {self.other} push"), [(self.other, None)])
-        self.assertEqual(self.targets("push", "git -C ../other push origin br"), [(self.other, None)])
-        self.assertEqual(self.targets("push", f"cd {self.root} && git -C other push"), [(self.other, None)])
+    def test_cd_and_dash_c(self) -> None:
+        self.assertFollowed(f"cd {self.other} && {PR} --fill", [("pr", self.other, None)])
+        self.assertFollowed(f"cd ../other; {PR} --fill", [("pr", self.other, None)])
+        self.assertFollowed(f"git -C {self.other} push", [("push", self.other, None)])
+        self.assertFollowed("git -C ../other push origin br", [("push", self.other, None)])
+        self.assertFollowed(f"cd {self.root} && git -C other push", [("push", self.other, None)])
+        self.assertFollowed(f"heavy-lock.sh run \"x\" -- git -C {self.other} push origin br",
+                            [("push", self.other, None)])
+        self.assertFollowed(f"{PR} --title 'fix #12' 2>&1 >/dev/null", [("pr", self.session, None)])
 
-    def test_wrapped_push(self) -> None:
-        command = f"heavy-lock.sh run \"x\" -- git -C {self.other} push origin br"
-        self.assertEqual(self.targets("push", command), [(self.other, None)])
+    def test_review_mixed_push_and_pr_gates_both(self) -> None:
+        # Review: a push in the same command as a PR was dropped.
+        self.assertFollowed(f"git -C {self.other} push && {PR}", [("push", self.other, None), ("pr", self.session, None)])
+        self.assertFollowed(f"git push && {PR} -R someone/else", [("push", self.session, None), ("pr", None, None)])
+        self.assertFollowed(f"git push origin HEAD; {PR} -R someone/else --fill",
+                            [("push", self.session, None), ("pr", None, None)])
 
-    def test_subshell_cd_does_not_leak(self) -> None:
-        self.assertEqual(self.targets("push", f"(cd {self.other} && git status); git push"), [(self.session, None)])
+    def test_review_quoted_operators_are_text(self) -> None:
+        self.assertFollowed("echo '>' && git push origin HEAD", [("push", self.session, None)])
+        self.assertFollowed(f"echo '>' && {PR} --fill", [("pr", self.session, None)])
 
-    def test_unresolvable_dir_keeps_the_current_one(self) -> None:
-        self.assertEqual(self.targets("pr", f"cd {self.root}/missing && {PR}"), [(self.session, None)])
-        self.assertEqual(self.targets("push", "git -C \"$NOT_SET_ANYWHERE\" push"), [(self.session, None)])
+    def test_review_flag_values_are_not_repo_flags(self) -> None:
+        self.assertFollowed(f"{PR} --title \"-Rsomeone/else\" --fill", [("pr", self.session, None)])
 
-    def test_unparseable_judges_the_session(self) -> None:
-        self.assertEqual(self.targets("pr", f"cd {self.other} && {PR} --title \"x"), [(self.session, None)])
+    def test_review_repo_flag_between_pr_and_create(self) -> None:
+        self.git_repo(self.session, "git@github.com:leopardaelectric/session-repo.git")
+        self.assertFollowed(PR_REPO_FIRST, [("pr", None, "leopardaelectric/x")])
+        self.assertFollowed("gh -R leopardaelectric/x pr create --fill", [("pr", None, "leopardaelectric/x")])
+
+    def test_review_api_formatting_args_dont_hide_the_endpoint(self) -> None:
+        self.git_repo(self.session, "git@github.com:leopardaelectric/session-repo.git")
+        command = "gh api repos/leopardaelectric/target/pulls -X POST --template \"--method=GET\" --input p.json"
+        self.assertFollowed(command, [("pr", None, "leopardaelectric/target")])
+        self.assertFollowed("gh api repos/leopardaelectric/session-repo/pulls -X GET", [("pr", self.session, None)])
 
     def test_repo_flag(self) -> None:
         self.git_repo(self.session, "git@github.com:leopardaelectric/session-repo.git")
-        self.assertEqual(self.targets("pr", f"{PR} -R leopardaelectric/other-repo"),
-                         [(None, "leopardaelectric/other-repo")])
-        self.assertEqual(self.targets("pr", f"{PR} --repo=https://github.com/LeopardaElectric/other-repo.git"),
-                         [(None, "leopardaelectric/other-repo")])
-        self.assertEqual(self.targets("pr", f"{PR} --repo leopardaelectric/session-repo"), [(self.session, None)])
-        self.assertEqual(self.targets("pr", f"{PR} -R someone/else"), [(None, None)])
-
-    def test_repo_flag_after_cd_compares_with_that_checkout(self) -> None:
         self.git_repo(self.other, "https://github.com/leopardaelectric/other-repo")
-        command = f"cd {self.other} && {PR} -R leopardaelectric/other-repo"
-        self.assertEqual(self.targets("pr", command), [(self.other, None)])
+        self.assertFollowed(f"{PR} -R leopardaelectric/other-repo", [("pr", None, "leopardaelectric/other-repo")])
+        self.assertFollowed(f"{PR} --repo=https://github.com/LeopardaElectric/other-repo.git",
+                            [("pr", None, "leopardaelectric/other-repo")])
+        self.assertFollowed(f"{PR} --repo leopardaelectric/session-repo", [("pr", self.session, None)])
+        self.assertFollowed(f"{PR} -R someone/else", [("pr", None, None)])
+        self.assertFollowed(f"cd {self.other} && {PR} -R leopardaelectric/other-repo", [("pr", self.other, None)])
 
     def test_mcp_owner_and_repo(self) -> None:
         self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
 
-        def target(tool_input: dict) -> list:
-            return vs.gate_targets("pr", "mcp__github__create_pull_request", tool_input, self.session)
+        def plan(tool_input: dict) -> tuple[list, bool]:
+            return vs.gate_plan({"pr"}, "mcp__github__create_pull_request", tool_input, self.session)
 
-        self.assertEqual(target({"owner": "leopardaelectric", "repo": "other-repo"}),
-                         [(None, "leopardaelectric/other-repo")])
-        self.assertEqual(target({"owner": "leopardaelectric", "repo": "session-repo"}), [(self.session, None)])
-        self.assertEqual(target({"owner": "someone", "repo": "else"}), [(None, None)])
-        self.assertEqual(target({"title": "no owner"}), [(self.session, None)])
+        self.assertEqual(plan({"owner": "leopardaelectric", "repo": "other-repo"}),
+                         ([("pr", None, "leopardaelectric/other-repo")], True))
+        self.assertEqual(plan({"owner": "leopardaelectric", "repo": "session-repo"}), ([("pr", self.session, None)], True))
+        self.assertEqual(plan({"owner": "someone", "repo": "else"}), ([("pr", None, None)], True))
+        self.assertEqual(plan({"title": "no owner"}), ([("pr", self.session, None)], True))
 
-    def test_interpreter_code_is_judged_where_the_interpreter_runs(self) -> None:
-        code = f"python3 -c \"import os; os.system('cd /elsewhere && {PR} -R leopardaelectric/x')\""
-        self.assertEqual(self.targets("pr", code), [(self.session, None)])
-        self.assertEqual(self.targets("pr", f"cd {self.other} && {code}"), [(self.other, None)])
-        self.assertEqual(self.targets("push", f"(cd {self.other}; node -e 'x(\"git push\")')"), [(self.other, None)])
 
-    def test_gh_api_repo_goes_through_the_repo_check(self) -> None:
-        self.git_repo(self.session, "git@github.com:leopardaelectric/session-repo.git")
-        self.git_repo(self.other, "https://github.com/leopardaelectric/other-repo.git")
-        post = "/pulls -X POST --input body.json"
-        self.assertEqual(self.targets("pr", f"gh api repos/leopardaelectric/session-repo{post}"),
-                         [(self.session, None)])
-        self.assertEqual(self.targets("pr", f"gh api /repos/LeopardaElectric/other-repo{post}"),
-                         [(None, "leopardaelectric/other-repo")])
-        self.assertEqual(self.targets("pr", f"cd {self.other} && gh api repos/leopardaelectric/other-repo{post}"),
-                         [(self.other, None)])
-        self.assertEqual(self.targets("pr", f"gh api repos/someone/else{post}"), [(None, None)])
-        self.assertEqual(self.targets("pr", f"gh api repos/{{owner}}/{{repo}}{post}"), [(self.session, None)])
+class UnionPlans(TempDirs):
+    """Anything else: the session's checkout and every checkout named, never fewer."""
+
+    def assertUnion(self, command: str, kind: str, named: list[str] | None = None) -> list:
+        plan, followed = self.plan(command)
+        self.assertFalse(followed, command)
+        judged = [d for k, d, held in plan if k == kind and not held]
+        self.assertEqual(judged, [self.session] + (named or []), command)
+        return plan
+
+    def test_review_shell_options_here_strings_heredocs_and_backticks(self) -> None:
+        o = self.other
+        self.assertUnion("bash -euo pipefail -c 'git push'", "push")
+        self.assertUnion(f"bash -o pipefail -c 'cd {o} && git push'", "push", [o])
+        self.assertUnion("bash --rcfile f -c 'git push'", "push")
+        self.assertUnion("bash -c -- 'git push'", "push")
+        self.assertUnion("bash -s x <<EOF\ngit push\nEOF", "push")
+        self.assertUnion(f"bash <<< 'cd {o} && git push'", "push", [o])
+        self.assertUnion(f"python3 - <<'PY'\nimport os\nos.system('cd {o} && git push')\nPY", "push", [o])
+        self.assertUnion(f"x=`cd {o} && git push`", "push", [o])
+
+    def test_review_unresolvable_directories(self) -> None:
+        o = self.other
+        self.git_repo(o, "https://github.com/leopardaelectric/other-repo.git")
+        self.assertUnion(f"if cd {o}; then git push; fi", "push", [o])
+        self.assertUnion(f"{{ cd {o}; }}; git push", "push", [o])
+        self.assertUnion(f"D={o}; cd \"$D\" && git push", "push", [o])
+        self.assertUnion(f"GIT_DIR={o}/.git git push", "push", [o])
+        self.assertUnion(f"git --git-dir={o}/.git push", "push", [o])
+        self.assertUnion(f"cd {o} && cd - && git push", "push", [o])
+        self.assertUnion("cat <<EOF\nnever ends && git push", "push")
+        self.assertUnion(f"cd {self.root}/missing && {PR}", "pr")
+        self.assertUnion("git -C \"$NOT_SET_ANYWHERE\" push", "push")
+        os.makedirs(os.path.join(self.session, "sub"))
+        self.assertUnion("cd sub && git push", "push", [os.path.join(self.session, "sub")])  # may follow CDPATH
+        self.assertUnion(f"env -C {o} git push", "push", [o])
+        self.assertUnion(f"builtin cd {o}; git push", "push", [o])
+
+    def test_review_heredoc_expansions_and_interpreter_stdin(self) -> None:
+        self.assertUnion("cat <<EOF\n$(git push origin HEAD)\nEOF", "push")
+        self.assertUnion("python3 - <<'PY'\nimport os\nos.system(' git push origin HEAD ')\nPY", "push")
+
+    def test_review_pipeline_and_background_cd(self) -> None:
+        self.assertUnion(f"cd {self.other} | cat; git push origin HEAD", "push", [self.other])
+        self.assertUnion(f"cd {self.other} & wait; git push origin HEAD", "push", [self.other])
+
+    def test_review_directory_restoration(self) -> None:
+        self.assertUnion(f"cd {self.other}; cd -; {PR} --fill", "pr", [self.other])
+        self.assertUnion(f"pushd {self.other}; popd; {PR} --fill", "pr", [self.other])
+
+    def test_review_inline_interpreter_code(self) -> None:
+        o, s = self.other, self.session
+        plan = self.assertUnion(f"cd {o} && python3 -c 'import os; os.system(\"cd {s} && git push origin HEAD\")'",
+                                "push", [o])
+        self.assertIn(("push", s, None), plan)
+        self.assertUnion(f"python3 -c \"import subprocess; subprocess.run(['git', '-C', '{o}', 'push'])\"", "push", [o])
+        self.assertUnion("python3 -c 'import os; os.system(\"git -c k=v push\")'", "push")
+        self.assertUnion("python3 -c 'import os; os.system(\"git --no-pager push\")'", "push")
+        self.assertUnion("node --eval 'require(\"child_process\").execSync(\"git push origin HEAD\")'", "push")
+        self.assertUnion(f"php -r 'exec(\"{PR}\");'", "pr")
+
+    def test_review_graphql_pr_creation(self) -> None:
+        self.assertUnion("gh api graphql -f query='mutation{createPullRequest(input:{})}'", "pr")
+
+    def test_review_partial_placeholders_and_gh_repo(self) -> None:
+        self.git_repo(self.session, "https://github.com/someone/target.git")
+        plan = self.assertUnion("gh api repos/leopardaelectric/{repo}/pulls -X POST --input p.json", "pr")
+        self.assertIn(("pr", None, "leopardaelectric/{repo}"), plan)
+        plan = self.assertUnion(f"GH_REPO=leopardaelectric/x {PR}", "pr")
+        self.assertIn(("pr", None, "leopardaelectric/x"), plan)
+
+    def test_placeholders_in_a_vammo_checkout_judge_it(self) -> None:
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
+        plan = self.assertUnion("gh api repos/{owner}/{repo}/pulls -X POST --input p.json", "pr")
+        self.assertEqual([step for step in plan if step[2]], [])
+
+    def test_repeated_repo_flags_hold_every_unknown_vammo_repo(self) -> None:
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
+        plan = self.assertUnion(f"{PR} -R leopardaelectric/a -R leopardaelectric/session-repo", "pr")
+        self.assertEqual([step for step in plan if step[2]], [("pr", None, "leopardaelectric/a")])
+
+    def test_a_mention_the_parser_cant_place_is_judged_on_the_session(self) -> None:
+        self.assertUnion(f"git commit -m 'then {PR}'", "pr")
+        self.assertUnion("echo git push", "push")
+
+    def test_any_exception_in_the_parser_falls_back_to_the_union(self) -> None:
+        with mock.patch.object(vs, "simple_calls", side_effect=KeyError("boom")):
+            self.assertUnion(f"cd {self.other} && git push", "push", [self.other])
 
 
 class Hook(TempDirs):
-    def run_hook(self, command: str) -> dict:
+    def run_hook(self, command: str) -> dict | None:
         event = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": self.session}
         out = io.StringIO()
         with mock.patch.object(vs.sys, "stdin", io.StringIO(json.dumps(event))), \
                 mock.patch.object(vs.sys, "stdout", out):
-            vs.cmd_hook()
-        return json.loads(out.getvalue())["hookSpecificOutput"]
+            self.assertEqual(vs.cmd_hook(), 0)
+        return json.loads(out.getvalue())["hookSpecificOutput"] if out.getvalue() else None
+
+    def gated(self, command: str, deny_first: bool = False) -> list[tuple[str, str, bool]]:
+        calls = []
+
+        def record(kind: str, top: str, session: str, tool_input: dict, followed: bool) -> bool:
+            calls.append((kind, top, followed))
+            return deny_first
+
+        with mock.patch.object(vs, "gate_checkout", record):
+            self.run_hook(command)
+        return calls
 
     def test_unresolved_target_message_is_not_specific_to_one_command(self) -> None:
         self.git_repo(self.session, "git@github.com:leopardaelectric/session-repo.git")
@@ -234,6 +278,56 @@ class Hook(TempDirs):
         self.assertIn("targets leopardaelectric/other-repo, which is not the repository this session is in", reason)
         self.assertIn("Open it from a checkout of leopardaelectric/other-repo (`cd <its worktree> && ...`)", reason)
         self.assertNotIn(PR, reason)
+
+    def test_every_push_and_pr_target_is_gated(self) -> None:
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
+        self.git_repo(self.other, "https://github.com/leopardaelectric/other-repo.git")
+        self.assertEqual(self.gated(f"git -C {self.other} push && {PR}"),
+                         [("push", self.other, True), ("pr", self.session, True)])
+        self.assertEqual(self.gated(f"bash -c 'cd {self.other} && git push && {PR}'"),
+                         [("push", self.session, False), ("push", self.other, False),
+                          ("pr", self.session, False), ("pr", self.other, False)])
+
+    def test_first_deny_wins(self) -> None:
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
+        self.git_repo(self.other, "https://github.com/leopardaelectric/other-repo.git")
+        self.assertEqual(self.gated(f"git -C {self.other} push && {PR}", deny_first=True), [("push", self.other, True)])
+
+    def test_one_gate_per_checkout(self) -> None:
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
+        os.makedirs(os.path.join(self.session, "sub"))
+        self.assertEqual(self.gated(f"bash -c 'cd {self.session}/sub && git push'"), [("push", self.session, False)])
+
+    def test_an_exception_in_the_target_logic_gates_the_session(self) -> None:
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git")
+        with mock.patch.object(vs, "gate_plan", side_effect=RuntimeError("boom")):
+            self.assertEqual(self.gated(f"cd {self.other} && git push && {PR}"),
+                             [("push", self.session, False), ("pr", self.session, False)])
+
+    def test_a_command_with_nothing_gated_exits_before_any_git_call(self) -> None:
+        with mock.patch.object(vs, "git", side_effect=AssertionError("git called")):
+            self.assertIsNone(self.run_hook("git status && ls -la && gh pr view 12"))
+
+    def test_scan_request_explains_the_union(self) -> None:
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git", commit=True)
+        with mock.patch.object(vs, "secrets_gate", return_value=False), \
+                mock.patch.object(vs, "claude_security_installed", return_value=True):
+            union = self.run_hook(f"bash -c '{PR} --fill'")["permissionDecisionReason"]
+            followed = self.run_hook(f"{PR} --fill")["permissionDecisionReason"]
+        self.assertIn("has not been scanned", union)
+        self.assertIn("This command's shape isn't one the gate follows", union)
+        self.assertNotIn("checkout at", union)
+        self.assertNotIn("This command's shape", followed)
+
+
+class HooksJson(unittest.TestCase):
+    def test_review_every_bash_call_starts_the_script(self) -> None:
+        entries = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]["PreToolUse"]
+        bash_hooks = [h for e in entries if e["matcher"] == "Bash" for h in e["hooks"]]
+        self.assertEqual(len(bash_hooks), 1)
+        self.assertNotIn("if", bash_hooks[0])
+        self.assertIn("vammo_security.py\" hook", bash_hooks[0]["command"])
+        self.assertIn("mcp__.*__create_pull_request", [e["matcher"] for e in entries])
 
 
 class SaveState(TempDirs):

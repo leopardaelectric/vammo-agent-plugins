@@ -4,20 +4,23 @@
 Two PreToolUse gates, both deterministic: no model runs inside this script.
 
 - Before `git push`: TruffleHog runs on the commits being pushed. A secret holds the push.
-- Before a pull request is created (`gh pr create`, a `gh api` POST to `repos/<owner>/<name>/pulls`,
-  or a GitHub MCP `create_pull_request` tool), two checks run:
+- Before a pull request is created (`gh pr create`, a `gh api` call to `.../pulls`, a GraphQL
+  `createPullRequest`, or a GitHub MCP `create_pull_request` tool), two checks run:
   1. TruffleHog runs on the branch's commits. A secret holds the PR.
   2. The branch's HEAD must be "covered": it was scanned by the claude-security plugin, or
      it is the commit that applied that scan's patches. If it isn't, Claude is told to run
      the pre-pr-security skill first. There is no skip.
 
-Both gates judge the checkout the command targets, not the session's: `cd <dir> && ...` and
-`git -C <dir> push` are followed. A pull request for another Vammo repository (`gh pr create -R`,
-the `gh api` endpoint's owner/name, or the MCP tool's owner/repo) whose checkout can't be
-resolved is held, with instructions to open it from that checkout. Text that only mentions the
-commands (quoted, or a heredoc body) doesn't trigger a gate. Inline code an interpreter runs
-(`python3 -c`, `node -e`, `perl -e`, `ruby -e`, `php -r`) does when it contains them, and is
-judged in the directory the interpreter runs in.
+Both gates fail closed. Whether a Bash command pushes or opens a PR is read from its whole
+text, so a command that only mentions one (quoted, in a heredoc body, in a commit message)
+triggers the gate too. Which checkout is judged: a plain command line (`cd <dir>`,
+`git -C <dir> push`, `gh pr create [-R <repo>]`, `gh api repos/<owner>/<name>/pulls`, joined
+only by `&&` or `;`) is followed exactly, so `cd <dir> && gh pr create` judges `<dir>`. Any
+other shape (a pipe, a subshell, `bash -c`, inline interpreter code, a heredoc, a variable)
+is judged on the session's checkout and on every checkout the command names after `cd`, `-C`,
+`--git-dir` or `GIT_DIR`. A pull request for another Vammo repository (`-R`, the `gh api`
+endpoint's owner/name, or the MCP tool's owner/repo) that none of those checkouts is, is held,
+with instructions to open it from that repository's checkout.
 
 Secrets: a verified (live) secret always holds the push or PR. An unverified hit holds it
 until the person confirms it's a false positive (`accept-secret`); after that, neither gate
@@ -46,23 +49,17 @@ from __future__ import annotations
 
 import glob
 import hashlib
-import io
 import json
 import os
 import platform
 import re
-import shlex
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-PR_COMMAND = re.compile(r"(^|[\s;&|(])gh\s+pr\s+create(\s|$)")
-PUSH_COMMAND = re.compile(r"(^|[\s;&|(])git\s+(?:-C\s+\S+\s+)?push(\s|$)")
 PR_BASE_FLAG = re.compile(r"\s(?:--base|-B)[=\s]+([A-Za-z0-9._/-]{1,200})")
 SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
 
@@ -156,6 +153,8 @@ def release_asset() -> str | None:
 
 
 def download_trufflehog(target: Path) -> None:
+    import io, tarfile, urllib.request  # here, not at the top: they add ~80 ms to every hook start
+
     asset = release_asset()
     if not asset:
         raise RuntimeError(f"no TruffleHog release for {sys.platform}/{platform.machine()}")
@@ -302,250 +301,303 @@ def deny(reason: str) -> None:
     }))
 
 
-OPERATOR_CHARS = ";&|()<>\n"
-SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
-GIT_VALUE_OPTIONS = {"-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
-# Quoted strings are matched first, so a `<<` inside one isn't taken for a heredoc.
-HEREDOC_SCAN = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|(?<!<)<<(?!<)(-?)[ \t]*(?:'([^']+)'|"([^"]+)"|\\?([\w.-]+))""")
+# Detection reads the whole text, so it fails closed: quoted text, heredoc bodies, inline code
+# and command substitutions all count. Between words: blanks, quotes, list punctuation (`"git",
+# "push"`) and backslashes. Up to six global options may sit between the program and its
+# subcommand, each with up to four words of value (`git -C "a b" push`, `gh -R x pr create`).
+_SEP = r"""[\s"',\\\[\]]+"""
+_OPT = r"""-[^\s"',\\\[\]]*"""
+_VAL = r"""[^\s"',\\\[\]-][^\s"',\\\[\]]*"""
+_OPTIONS = rf"(?:{_SEP}{_OPT}(?:{_SEP}{_VAL}){{0,4}}){{0,6}}?"  # bounded: linear time on any text
+_START, _END = r"(?<![\w.-])", r"(?![\w-])"
+PUSH_TEXT = re.compile(rf"{_START}git{_OPTIONS}{_SEP}push{_END}")
+PR_TEXT = re.compile(rf"{_START}gh{_OPTIONS}{_SEP}pr{_OPTIONS}{_SEP}create{_END}")
+API_TEXT = re.compile(rf"{_START}gh{_OPTIONS}{_SEP}api{_END}")
+PULLS_TEXT = re.compile(r"/pulls(?![\w-])")
+GRAPHQL_PR_TEXT = re.compile(r"createPullRequest")
+
+
+def detect(command: str) -> set[str]:
+    """The kinds of gated call ("push", "pr") a Bash command's text contains anywhere."""
+    kinds = set()
+    if PUSH_TEXT.search(command):
+        kinds.add("push")
+    if PR_TEXT.search(command) or GRAPHQL_PR_TEXT.search(command) or \
+            (API_TEXT.search(command) and PULLS_TEXT.search(command)):
+        kinds.add("pr")
+    return kinds
+
+
+class NotSimple(Exception):
+    """The command isn't a plain one whose targets the gate follows exactly."""
+
+
+# Outside quotes, any of these makes a command line not simple: expansions, subshells, groups,
+# pipes, negation, escapes, globs, comments, zsh's `^`, line breaks.
+NOT_SIMPLE_CHARS = set("$`(){}|!\\*?[]#^\n\r")
+NOT_SIMPLE_COMMANDS = {"if", "then", "else", "elif", "fi", "while", "until", "for", "do", "done", "case", "esac",
+                       "select", "function", "time", "coproc", "eval", "exec", "source", ".", "builtin", "command",
+                       "pushd", "popd", "alias"}
+# Shells, interpreters and wrappers that may run code or change directory (`env -C`, `sudo -D`).
+RUNS_CODE = re.compile(r"(?:ba|z|da|k|c|tc|fi)?sh|env|sudo|doas|xargs|parallel|"
+                       r"(?:python|pypy|node|nodejs|deno|bun|perl|ruby|php|lua|osascript|pwsh)[\d.]*")
+# Wrappers known to run their command in the current directory.
+WRAPPERS = {"timeout", "nice", "nohup", "caffeinate", "heavy-lock.sh"}
+GIT_FLAGS = {"--no-pager", "-P", "-p", "--paginate", "--no-optional-locks", "--no-replace-objects"}
+GH_PR_VALUE_FLAGS = {"-a", "--assignee", "-B", "--base", "-b", "--body", "-F", "--body-file", "-H", "--head",
+                     "-l", "--label", "-m", "--milestone", "-p", "--project", "-r", "--reviewer", "-T", "--template",
+                     "-t", "--title", "-R", "--repo", "--recover"}
+GH_PR_FLAGS = {"-d", "--draft", "--dry-run", "-e", "--editor", "-f", "--fill", "--fill-first", "--fill-verbose",
+               "--no-maintainer-edit", "-w", "--web"}
+ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
+API_ENDPOINT = re.compile(r"(?:https://api\.github\.com)?/?repos/([\w.-]+)/([\w.-]+)/pulls(?:[/?].*)?",
+                          re.IGNORECASE | re.DOTALL)
 GITHUB_REMOTE = re.compile(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", re.IGNORECASE)
 REPO_SPEC = re.compile(r"([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
 VAMMO_OWNER = "leopardaelectric"
-MAX_NESTING = 4
-API_PULLS = re.compile(r"(?:https://api\.github\.com)?/?repos/([\w.{}:-]+)/([\w.{}:-]+)/pulls/?(?:\?.*)?",
-                       re.IGNORECASE)
-API_PULLS_TEXT = re.compile(r"(^|[\s;&|(])gh\s+api\s.*repos/[^\s/]+/[^\s/]+/pulls\b")
-API_PARAM_OPTIONS = ("-f", "-F", "--field", "--raw-field", "--input")
-INTERPRETER = re.compile(r"(python)(?:\d+(?:\.\d+)*)?|(node|perl|ruby|php)")
-# Per interpreter: the short options whose value is code it runs, and the long ones.
-INLINE_CODE_OPTIONS = {
-    "python": ("c", ()),
-    "node": ("ep", ("--eval", "--print")),
-    "perl": ("eE", ()),
-    "ruby": ("e", ()),
-    "php": ("r", ()),
-}
-# In code, a command sits inside a string or a list (`os.system('gh pr create')`,
-# `["git", "push"]`): any non-word character may precede it, and list items may split its words.
-CODE_SEP = r"""(?:\s+|["']\s*,\s*["'])"""
-CODE_PR = re.compile(rf"(?<![\w.-])gh{CODE_SEP}pr{CODE_SEP}create(?![\w-])")
-CODE_PUSH = re.compile(rf"(?<![\w.-])git{CODE_SEP}(?:-C{CODE_SEP}[^\s,]+{CODE_SEP})?push(?![\w-])")
 
 
-def strip_heredocs(command: str) -> tuple[str, list[str]]:
-    """The command without its heredoc operators and bodies, and the bodies.
+def simple_commands(command: str) -> list[list[str]]:
+    """argv of each command of a line of plain commands joined by `&&` or `;`, quotes removed.
 
-    Raises ValueError when a heredoc never ends."""
-    kept, bodies, body, pending = [], [], [], []
-    for line in command.split("\n"):
-        if pending:
-            strip_tabs, delimiter = pending[0]
-            if (line.lstrip("\t") if strip_tabs else line) == delimiter:
-                bodies.append("\n".join(body))
-                body = []
-                pending.pop(0)
+    Redirections to a file or a descriptor are dropped. Raises NotSimple for anything else."""
+    commands: list[list[str]] = [[]]
+    word: str | None = None
+    redirect = False  # the next word is where a redirection goes, not an argument
+
+    def finish() -> None:
+        nonlocal word, redirect
+        if word is not None:
+            if redirect:
+                redirect = False
             else:
-                body.append(line)
-            continue
-        pieces, last = [], 0
-        for m in HEREDOC_SCAN.finditer(line):
-            delimiter = m.group(2) or m.group(3) or m.group(4)
-            if delimiter:
-                pieces.append(line[last:m.start()])
-                last = m.end()
-                pending.append((m.group(1) == "-", delimiter))
-        kept.append("".join(pieces) + line[last:])
-    if pending:
-        raise ValueError("unterminated heredoc")
-    return "\n".join(kept), bodies
+                commands[-1].append(word)
+        word = None
 
-
-def shell_words(text: str) -> list[str]:
-    """Shell words and operator runs (`&&`, `;`, `|`, `(`, newline, `>`...), quotes removed."""
-    lex = shlex.shlex(text.replace("\\\n", " "), posix=True, punctuation_chars=OPERATOR_CHARS)
-    lex.whitespace, lex.whitespace_split, lex.commenters = " \t\r", True, ""
-    return list(lex)
-
-
-def resolve_dir(here: str, path: str) -> str:
-    """path (relative to here, ~ and $VARS expanded) when it's a directory, else here."""
-    full = os.path.normpath(os.path.join(here, os.path.expanduser(os.path.expandvars(path))))
-    return full if os.path.isdir(full) else here
-
-
-def dir_after(argv: list[str], here: str) -> str:
-    """The directory the following commands run in after argv (`cd`/`pushd`)."""
-    if argv[0] not in ("cd", "pushd") or "-" in argv[1:]:
-        return here
-    args = [a for a in argv[1:] if not a.startswith("-")]
-    return resolve_dir(here, args[0] if args else "~")
-
-
-def inner_scripts(argv: list[str], bodies: list[str]) -> list[str]:
-    """Shell code a simple command runs from its words: `$(...)`, backticks, `sh -c`, `eval`,
-    and the heredoc bodies when a shell reads its script from stdin."""
-    scripts = []
-    for word in argv:
-        if "$(" in word:
-            scripts.append(word[word.index("$(") + 2:])
-        scripts += word.split("`")[1::2]
-    if argv[0] == "eval":
-        scripts.append(" ".join(argv[1:]))
-    for i, word in enumerate(argv):
-        if os.path.basename(word) not in SHELLS:
-            continue
-        rest = argv[i + 1:]
-        for j, opt in enumerate(rest):
-            if not opt.startswith("-"):
-                break
-            if not opt.startswith("--") and "c" in opt and j + 1 < len(rest):
-                scripts.append(rest[j + 1])
-                break
+    i = 0
+    while i < len(command):
+        c = command[i]
+        if c in "'\"":
+            end = command.find(c, i + 1)
+            body = command[i + 1:end]
+            if end < 0 or (c == '"' and set(body) & set("$`\\!")):
+                raise NotSimple("unbalanced quote, or an expansion inside double quotes")
+            word, i = (word or "") + body, end + 1
+        elif c in " \t":
+            finish()
+            i += 1
+        elif c == ";" or command.startswith("&&", i):
+            finish()
+            if redirect:
+                raise NotSimple("redirection without a target")
+            commands.append([])
+            i += 1 if c == ";" else 2
+        elif c in "<>":
+            if word is not None and word.isdigit():
+                word = None  # the descriptor of `2>`
+            finish()
+            if redirect or command[i:i + 2] in ("<<", "<>", "<(", ">(", ">|"):
+                raise NotSimple("heredoc, here-string or process substitution")
+            i += 2 if command.startswith(">>", i) else 1
+            dup = re.match(r"&(\d+|-)", command[i:])
+            if command.startswith("&", i) and not dup:
+                raise NotSimple("redirection to an unknown descriptor")
+            i, redirect = (i + dup.end(), False) if dup else (i, True)
+        elif c == "&" or c in NOT_SIMPLE_CHARS:
+            raise NotSimple(f"{c!r} outside quotes")
+        elif word is None and c == "~":
+            if command[i + 1:i + 2] not in ("", "/", " ", "\t", ";", "&", "<", ">"):
+                raise NotSimple("~user")
+            word, i = os.path.expanduser("~"), i + 1
+        elif word is None and c == "=":
+            raise NotSimple("zsh =command expansion")
         else:
-            scripts += bodies
-    return scripts
+            word, i = (word or "") + c, i + 1
+    finish()
+    if redirect:
+        raise NotSimple("redirection without a target")
+    return [argv for argv in commands if argv]
 
 
-def simple_commands(command: str, cwd: str, depth: int = 0) -> list[tuple[str, list[str]]]:
-    """(directory it runs in, argv) for each simple command a shell command line runs.
+def literal_dir(here: str, path: str, bare_name: bool) -> str:
+    """here/path when it names an existing directory literally. Raises NotSimple otherwise.
 
-    Raises ValueError when the line can't be parsed."""
-    if depth > MAX_NESTING:
-        raise ValueError("commands nested too deep")
-    text, bodies = strip_heredocs(command)
-    found, argv, here, scopes, redirect = [], [], cwd, [], False
-    for word in shell_words(text) + [";"]:
-        if word and not set(word) - set(OPERATOR_CHARS):
-            if word in ("&", "&&") or set(word) & set(";|\n()"):
-                if argv:
-                    found.append((here, argv))
-                    here = dir_after(argv, here)
-                    argv = []
-                for ch in word:
-                    if ch == "(":
-                        scopes.append(here)
-                    elif ch == ")" and scopes:
-                        here = scopes.pop()
-            else:
-                redirect = True  # the next word is where the redirection goes, not an argument
-            continue
-        if redirect:
-            redirect = False
+    A bare relative name is only allowed where no search path applies (`git -C x`, not `cd x`,
+    which may follow CDPATH)."""
+    if not path or path.startswith(("-", "+")):
+        raise NotSimple(f"directory {path!r}")
+    if not bare_name and not (os.path.isabs(path) or path in (".", "..") or path.startswith(("./", "../"))):
+        raise NotSimple(f"cd {path} may follow CDPATH")
+    full = os.path.normpath(os.path.join(here, path))
+    if not os.path.isdir(full):
+        raise NotSimple(f"{full} is not a directory")
+    return full
+
+
+def git_push_dir(args: list[str], here: str) -> str | None:
+    """The directory `git <args>` pushes from, or None when it doesn't push. Raises NotSimple."""
+    i = 0
+    while i < len(args):
+        if args[i] in ("-C", "-c") and i + 1 < len(args):
+            here = literal_dir(here, args[i + 1], bare_name=True) if args[i] == "-C" else here
+            i += 2
+        elif args[i] in GIT_FLAGS:
+            i += 1
+        elif args[i].startswith("-"):
+            raise NotSimple(f"git {args[i]}")  # --git-dir, --work-tree and the like
         else:
-            argv.append(word)
-    nested = [(here, script) for here, argv in found for script in inner_scripts(argv, bodies)]
-    for here, script in nested:
-        found += simple_commands(script, here, depth + 1)
-    return found
+            return here if args[i] == "push" else None
+    return None
 
 
-def inline_code(args: list[str], letters: str, long_options: tuple[str, ...]) -> list[str]:
-    """Every word of an interpreter's arguments that may be code it runs inline.
-
-    Over-inclusive on purpose: a cluster like `-pe` or `-Ic` offers both its attached rest and
-    the next word, since only a match against the gated commands makes a word count."""
-    short = re.compile(rf"-(?!-)[A-Za-z]*?[{letters}](.*)", re.DOTALL)
-    codes = []
-    for j, word in enumerate(args):
-        following = args[j + 1:j + 2]
-        for option in long_options:
-            if word == option:
-                codes += following
-            elif word.startswith(option + "="):
-                codes.append(word[len(option) + 1:])
-        m = short.fullmatch(word)
-        if m:
-            codes += ([m.group(1)] if m.group(1) else []) + following
-    return codes
-
-
-def api_pull_creation(args: list[str]) -> tuple[bool, str | None]:
-    """(whether it creates a pull request, owner/name it names) for a `gh api` call's arguments.
-
-    The default method is GET, or POST once a field or an input is given; -X/--method overrides it.
-    owner/name is None when the endpoint uses gh's placeholders for the current repository."""
-    endpoint = next((m for m in map(API_PULLS.fullmatch, args) if m), None)
-    if not endpoint:
-        return False, None
-    method, has_params = None, False
-    for j, arg in enumerate(args):
-        if arg in ("-X", "--method"):
-            method = args[j + 1] if j + 1 < len(args) else method
-        elif arg.startswith("--method="):
-            method = arg.split("=", 1)[1]
-        elif arg.startswith("-X"):
-            method = arg[2:].lstrip("=")
-        elif arg in API_PARAM_OPTIONS or arg.startswith(("--field=", "--raw-field=", "--input=", "-f", "-F")):
-            has_params = True
-    creates = method.upper() == "POST" if method else has_params
-    owner, name = endpoint.groups()
-    return creates, None if set(owner + name) & set("{}:") else f"{owner}/{name}"
+def gh_pr_repos(args: list[str]) -> list[str | None]:
+    """[its -R repo, or None] when `gh <args>` creates a pull request, else []. Raises NotSimple."""
+    words = [a for a in args if not a.startswith("-")]
+    if words[:1] == ["api"]:
+        if any(a.startswith("--hostname") for a in args):
+            raise NotSimple("gh api --hostname")
+        repos = {f"{m.group(1)}/{m.group(2)}".lower() for m in map(API_ENDPOINT.fullmatch, args) if m}
+        if len(repos) > 1:
+            raise NotSimple("more than one pulls endpoint")
+        return list(repos)
+    if "pr" not in words or "create" not in words:
+        return []
+    words, repos, i = [], [], 0
+    while i < len(args):
+        arg = args[i]
+        name, eq, value = arg.partition("=") if arg.startswith("--") else (arg[:2], "", arg[2:].removeprefix("="))
+        if not arg.startswith("-") or arg == "-":
+            words.append(arg)
+        elif name in GH_PR_VALUE_FLAGS:
+            if not (eq or value):
+                i += 1
+                if i == len(args):
+                    raise NotSimple(f"{name} without a value")
+                value = args[i]
+            if name in ("-R", "--repo"):
+                repos.append(value)
+        elif name not in GH_PR_FLAGS or eq or value:
+            raise NotSimple(f"gh flag {arg}")
+        i += 1
+    if words != ["pr", "create"] or len(repos) > 1:
+        raise NotSimple("not a plain pull request creation")
+    return repos or [None]
 
 
-def gated_calls(command: str, cwd: str) -> list[tuple[str, str, list[str]]]:
-    """(kind, directory, arguments) for each push or PR creation a shell command line runs.
+def simple_calls(command: str, cwd: str) -> list[tuple[str, str, str | None]]:
+    """(kind, directory, repo spec) for each push and PR creation of a plain command line.
 
-    A command counts wherever it starts in a simple command's words, so wrappers (`env`,
-    `timeout`, `<tool> -- git push`) are covered; quoted text and heredoc bodies never count.
-    Inline interpreter code that contains a gated command counts, in the interpreter's directory,
-    with no arguments. A `gh api` PR creation carries the repository it names as `--repo`.
-    Raises ValueError when the line can't be parsed."""
-    calls = []
-    for here, argv in simple_commands(command, cwd):
-        for i, word in enumerate(argv):
-            name = os.path.basename(word)
-            if name == "gh" and argv[i + 1:i + 3] == ["pr", "create"]:
-                calls.append(("pr", here, argv[i + 3:]))
-                continue
-            if name == "gh" and argv[i + 1:i + 2] == ["api"]:
-                creates, repo = api_pull_creation(argv[i + 2:])
-                if creates:
-                    calls.append(("pr", here, ["--repo", repo] if repo else []))
-                continue
-            interpreter = INTERPRETER.fullmatch(name)
-            if interpreter:
-                letters, long_options = INLINE_CODE_OPTIONS[interpreter.group(1) or interpreter.group(2)]
-                for code in inline_code(argv[i + 1:], letters, long_options):
-                    calls += [(kind, here, []) for kind, pattern in (("pr", CODE_PR), ("push", CODE_PUSH))
-                              if pattern.search(code)]
-                continue
-            if name != "git":
-                continue
-            where, j = here, i + 1
-            while j < len(argv) and argv[j].startswith("-"):
-                if argv[j] == "-C" and j + 1 < len(argv):
-                    where = resolve_dir(where, argv[j + 1])
-                j += 2 if argv[j] == "-C" or argv[j] in GIT_VALUE_OPTIONS else 1
-            if j < len(argv) and argv[j] == "push":
-                calls.append(("push", where, argv[j + 1:]))
+    Follows `cd <dir>`, `git -C <dir> push`, `gh pr create [-R <repo>]` (`-R` may also sit before
+    `create`) and `gh api repos/<owner>/<name>/pulls`, alone or after a known wrapper. Raises
+    NotSimple for anything else."""
+    here, calls = cwd, []
+    for argv in simple_commands(command):
+        n = 0
+        while n < len(argv) and ASSIGNMENT.match(argv[n]):
+            if argv[n].startswith(("GIT_", "GH_")):
+                raise NotSimple(f"{argv[n].split('=')[0]} changes the repository")
+            n += 1
+        words = argv[n:]
+        names = [os.path.basename(w) for w in words]
+        if not words:
+            continue
+        if names[0] == "cd":
+            if n or len(words) != 2:
+                raise NotSimple("cd with options, no argument or an environment")
+            here = literal_dir(here, words[1], bare_name=False)
+            continue
+        if names[0] in NOT_SIMPLE_COMMANDS or "cd" in names[1:] or os.path.isdir(os.path.join(here, words[0])) \
+                or any(RUNS_CODE.fullmatch(name) for name in names):
+            raise NotSimple(f"{names[0]} may run code or change directory")
+        start = next((j for j, name in enumerate(names) if name in ("git", "gh")), None) \
+            if names[0] in WRAPPERS else 0
+        if start is None:
+            continue
+        if names[start] == "git":
+            where = git_push_dir(words[start + 1:], here)
+            calls += [("push", where, None)] if where else []
+        elif names[start] == "gh":
+            calls += [("pr", here, repo) for repo in gh_pr_repos(words[start + 1:])]
+        elif "git" in names or "gh" in names:
+            raise NotSimple("git or gh where the gate doesn't follow it")
     return calls
 
 
-def classify(tool_name: str, tool_input: dict) -> str | None:
-    if tool_name == "Bash":
-        command = str(tool_input.get("command", ""))
-        try:
-            kinds = {kind for kind, _, _ in gated_calls(command, os.getcwd())}
-        except ValueError:
-            # Unparseable: match the text anywhere, so the gate fails closed.
-            kinds = {kind for kind, pattern in (("pr", PR_COMMAND), ("pr", API_PULLS_TEXT), ("push", PUSH_COMMAND))
-                     if pattern.search(command)}
-        return next((kind for kind in ("pr", "push") if kind in kinds), None)
-    # GitHub MCP servers name the tool create_pull_request (mcp__<server>__create_pull_request).
-    if tool_name.startswith("mcp__") and tool_name.endswith("__create_pull_request"):
-        return "pr"
-    return None
+# Any directory the text names after cd/pushd/-C/--git-dir/--work-tree/GIT_DIR/GIT_WORK_TREE.
+_NAMES_DIR = r"(?:cd|pushd|-C|--git-dir|--work-tree|GIT_DIR|GIT_WORK_TREE)"
+NAMED_PATH = re.compile(rf"""{_START}{_NAMES_DIR}(?:=|[\s"',\\\[\]]+)([^\s"',\\\[\];&|<>`()]+)""")
+NAMED_QUOTED_PATH = re.compile(rf"""{_START}{_NAMES_DIR}(?:=|\s+)(?:"([^"]+)"|'([^']+)')""")
+ASSIGNMENT_TEXT = re.compile(r"""(?<![\w$])([A-Za-z_]\w*)=(?:"([^"]*)"|'([^']*)'|([^\s;&|<>`()]+))""")
+REPO_TEXT = re.compile(rf"""{_START}(?:-R|--repo|GH_REPO)(?:=|[\s"']+)?([^\s"';&|<>`()]+)|"""
+                       r"""repos/([^\s/"'`]+)/([^\s/"'`]+)/""")
 
 
-def repo_flag(args: list[str]) -> str | None:
-    """The `-R`/`--repo` value of a `gh pr create`."""
-    for i, arg in enumerate(args):
-        if arg in ("-R", "--repo"):
-            return args[i + 1] if i + 1 < len(args) else None
-        if arg.startswith("--repo="):
-            return arg.split("=", 1)[1]
-        if arg.startswith("-R") and len(arg) > 2:
-            return arg[2:]
-    return None
+def named_dirs(command: str, cwd: str) -> list[str]:
+    """The session's directory, then every existing directory the command names (see NAMED_PATH),
+    with variables the command assigns, then the environment's, expanded."""
+    assigned = {m.group(1): next(g for g in m.groups()[1:] if g is not None) for m in ASSIGNMENT_TEXT.finditer(command)}
+    raw = [(m.start(), m.group(1)) for m in NAMED_PATH.finditer(command)] + \
+        [(m.start(), m.group(1) or m.group(2)) for m in NAMED_QUOTED_PATH.finditer(command)]
+    dirs = [cwd]
+    for _, path in sorted(raw):
+        for name, value in sorted(assigned.items(), key=lambda item: -len(item[0])):
+            path = path.replace(f"${{{name}}}", value).replace(f"${name}", value)
+        path = os.path.expanduser(os.path.expandvars(path))
+        for base in list(dirs):
+            full = os.path.normpath(os.path.join(base, path))
+            found = os.path.dirname(full) if os.path.basename(full) == ".git" and os.path.exists(full) else full
+            if os.path.isdir(found) and found not in dirs:
+                dirs.append(found)
+    return dirs
+
+
+def named_repos(command: str) -> set[str]:
+    """owner/name (lowercase) of every repository the text names after -R/--repo/GH_REPO or in
+    a `repos/<owner>/<name>/` path. A placeholder name (`{repo}`, `:repo`) is kept as is."""
+    specs = set()
+    for m in REPO_TEXT.finditer(command):
+        spec = REPO_SPEC.search(m.group(1)) if m.group(1) else None
+        owner, name = (spec.group(1), spec.group(2)) if spec else (m.group(2), m.group(3))
+        if owner and name:
+            specs.add(f"{owner}/{name}".lower())
+    return specs
+
+
+def union_plan(kinds: set[str], command: str, cwd: str) -> list[tuple[str, str | None, str | None]]:
+    """The plan for a command whose targets can't be followed: every detected gate on the
+    session's checkout and every checkout the command names; and, for a PR, every Vammo
+    repository named that none of those checkouts is, held."""
+    dirs = named_dirs(command, cwd)
+    plan = [(kind, d, None) for kind in ("push", "pr") if kind in kinds for d in dirs]
+    if "pr" in kinds:
+        known = set().union(*(github_repos(d) for d in dirs))
+        for spec in sorted(named_repos(command)):
+            owner, name = spec.split("/", 1)
+            if owner != VAMMO_OWNER:
+                continue
+            placeholder = bool(set(name) & set("{}:"))
+            if spec not in known and not (placeholder and any(r.startswith(f"{VAMMO_OWNER}/") for r in known)):
+                plan.append(("pr", None, spec))
+    return plan
+
+
+def gate_plan(kinds: set[str], tool_name: str, tool_input: dict,
+              cwd: str) -> tuple[list[tuple[str, str | None, str | None]], bool]:
+    """([(kind, checkout to judge, Vammo repo held as unresolved)], whether the targets were
+    followed exactly), pushes first. Falls back to union_plan on anything it can't follow."""
+    if tool_name != "Bash":
+        owner, repo = tool_input.get("owner"), tool_input.get("repo")
+        return [("pr", *pr_target(f"{owner}/{repo}" if owner and repo else None, cwd))], True
+    command = str(tool_input.get("command", ""))
+    try:
+        calls = simple_calls(command, cwd)
+        if not kinds <= {kind for kind, _, _ in calls}:
+            raise NotSimple("the text has a gated command the parser didn't place")
+        plan = [("push", where, None) if kind == "push" else ("pr", *pr_target(repo, where))
+                for kind, where, repo in calls]
+        return sorted(plan, key=lambda step: step[0] != "push"), True
+    except Exception:  # anything unexpected fails closed onto the union, never open
+        return union_plan(kinds, command, cwd), False
 
 
 def github_repos(directory: str) -> set[str]:
@@ -568,22 +620,6 @@ def pr_target(spec: str | None, directory: str) -> tuple[str | None, str | None]
     if repo.split("/")[0] != VAMMO_OWNER:
         return None, None
     return None, repo
-
-
-def gate_targets(kind: str, tool_name: str, tool_input: dict, cwd: str) -> list[tuple[str | None, str | None]]:
-    """What each push or PR in the call targets, as pr_target returns it."""
-    if tool_name != "Bash":
-        owner, repo = tool_input.get("owner"), tool_input.get("repo")
-        return [pr_target(f"{owner}/{repo}" if owner and repo else None, cwd)]
-    try:
-        calls = [(where, args) for k, where, args in gated_calls(str(tool_input.get("command", "")), cwd) if k == kind]
-    except ValueError:
-        calls = []
-    if not calls:
-        return [(cwd, None)]  # unparseable: judge the session's checkout
-    if kind == "push":
-        return list(dict.fromkeys((where, None) for where, _ in calls))
-    return list(dict.fromkeys(pr_target(repo_flag(args), where) for where, args in calls))
 
 
 def secrets_gate(top: str, gate: str, base: str | None) -> bool:
@@ -620,31 +656,60 @@ def secrets_gate(top: str, gate: str, base: str | None) -> bool:
     return True
 
 
+def toplevel(directory: str) -> str | None:
+    try:
+        return os.path.realpath(git(directory, "rev-parse", "--show-toplevel"))
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def cmd_hook() -> int:
     try:
         event = json.load(sys.stdin)
     except ValueError:
         return 0
+    if not isinstance(event, dict):
+        return 0
     tool_name = str(event.get("tool_name", ""))
     tool_input = event.get("tool_input") or {}
-    kind = classify(tool_name, tool_input) if isinstance(tool_input, dict) else None
-    if not kind:
+    if not isinstance(tool_input, dict):
+        return 0
+    if tool_name == "Bash":
+        kinds = detect(str(tool_input.get("command", "")))
+    # GitHub MCP servers name the tool create_pull_request (mcp__<server>__create_pull_request).
+    elif tool_name.startswith("mcp__") and tool_name.endswith("__create_pull_request"):
+        kinds = {"pr"}
+    else:
+        return 0
+    if not kinds:
         return 0
     cwd = str(event.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
-    for directory, unresolved in gate_targets(kind, tool_name, tool_input, cwd):
+    try:
+        plan, followed = gate_plan(kinds, tool_name, tool_input, cwd)
+    except Exception:  # never let an error in the target logic skip the gates
+        plan, followed = [(kind, cwd, None) for kind in ("push", "pr") if kind in kinds], False
+    judged = set()
+    for kind, directory, unresolved in plan:
         if unresolved:
             deny(f"Vammo pre-PR security check: this pull request targets {unresolved}, which is not the "
                  "repository this session is in, so its HEAD can't be checked from here and the pull "
                  f"request is held. Open it from a checkout of {unresolved} (`cd <its worktree> && ...`), "
                  "so the checks run on that checkout's own HEAD. There is no way to skip this check.")
             return 0
-        if directory and gate_checkout(kind, directory, cwd, tool_input):
+        top = toplevel(directory) if directory else None
+        if not top or (kind, top) in judged:
+            continue
+        judged.add((kind, top))
+        if gate_checkout(kind, top, cwd, tool_input, followed):
             return 0
     return 0
 
 
-def gate_checkout(kind: str, directory: str, session_dir: str, tool_input: dict) -> bool:
-    """Runs the push or PR gate on the checkout at directory. True when it denied the call."""
+def gate_checkout(kind: str, directory: str, session_dir: str, tool_input: dict, followed: bool = True) -> bool:
+    """Runs the push or PR gate on the checkout at directory. True when it denied the call.
+
+    followed: whether the command's targets were followed exactly; when not, the message says why
+    this checkout was judged."""
     try:
         top = git(directory, "rev-parse", "--show-toplevel")
         head = git(directory, "rev-parse", "HEAD")
@@ -676,8 +741,15 @@ def gate_checkout(kind: str, directory: str, session_dir: str, tool_input: dict)
         "changes with claude-security at medium effort, fix the findings with its verified patches, "
         "commit and push, record coverage, and then create the pull request again, adding the skill's "
         "summary to the body. Start the scan without asking first. There is no way to skip this check."
+        + ("" if followed else UNION_NOTE)
     )
     return True
+
+
+UNION_NOTE = (" This command's shape isn't one the gate follows (only plain `cd <dir>`, `git -C <dir> push`, "
+              "`gh pr create [-R <repo>]` and `gh api repos/<owner>/<name>/pulls` commands joined by `&&` or `;` "
+              "are), so the session's checkout and every checkout the command names are judged. To publish "
+              "from another checkout, run a plain command from it instead.")
 
 
 def checkout_note(top: str, session_dir: str) -> str:
