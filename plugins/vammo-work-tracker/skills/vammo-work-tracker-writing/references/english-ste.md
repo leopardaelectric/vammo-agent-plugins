@@ -37,6 +37,16 @@ these short pointers do not replace their explanations or the dictionary.
 A mechanical count alone cannot establish fidelity or approved vocabulary. A technical literal
 does not make all surrounding jargon approved terminology.
 
+Read the dictionary entry itself, not just search matches. In Part 2, an uppercase headword marks
+an approved entry; a lowercase headword gives an unapproved form and its alternatives. Uppercase
+words in examples or alternative columns do not approve the searched form. Check its own row,
+part of speech and meaning. Approval of a noun does not approve the same spelling as a verb.
+
+Apply technical categories in context. Rule 1.12 permits **press** for computer input and **close**
+for a user-interface process; their ordinary dictionary entries alone do not decide those uses.
+Use an approved ordinary verb when it gives the same precise meaning. A software setting alone
+does not turn every surrounding word into a technical term.
+
 ## Edit the complete draft before delivery
 
 For every English artifact, make a final pass over the actual draft, not just the source or an
@@ -79,6 +89,9 @@ Then check these constructions:
 - Rule 5.4 puts a required condition before the command. For example: “When the list is available,
   start the work.” Keep the prerequisite, its source and any prohibition on an earlier start.
   A dependency must not become a promise that its input has arrived.
+  Apply this order to prohibitions too: “Until the list is available, do not start the test.”
+  A prerequisite after “Do not start ...” still needs this edit; a later condition-first step
+  does not repair the earlier instruction.
 - A business or software context does not approve every ordinary verb or noun as a technical term.
   Check the technical category and actual company, industry or subject-field usage. Keep a term
   only with that basis; an unverified exception stays unverified in review evidence.
