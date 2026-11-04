@@ -111,6 +111,13 @@ entire draft delivery, including separate metadata blocks, introductions and rec
 actionable dependency on another project. A comparison does not add a purchase decision; an
 observation-only progress note does not add instructions from the existing criteria.
 
+The November 4 review update carries the final November 3 local writing corrections. The recorded
+six synthetic native outputs received five partial grades and one pass in independent review.
+English vocabulary/construction faults and technical-term evidence remain open; package integrity
+does not establish editorial acceptance. The source review must resolve or explicitly accept these
+limits before publication. The package remains `WORKTREE` / `development` until approved canonical
+integration and authenticated immutable readback. No private test output or official manual is bundled.
+
 After an authorized release, update and restart:
 
 ```sh
@@ -140,12 +147,37 @@ bytes and package hashes; `--verify-package` checks local integrity, not authent
 origin. Neither command changes the source repository or other plugin files. Unknown files are
 preserved; package verification refuses unmanifested files inside the writing skill.
 
-Before release, integrate the canonical source, read all three files back from its full immutable
-commit through authenticated corporate access, and compare their hashes. Only after that separate
-review may the manifest be promoted to `sourceStatus: published` with the full `sourceRevision`.
-The sync command cannot self-claim publication and resets provenance to development on a new sync.
-Use `--verify-package --require-published` as an additional release check; it validates the declaration
-and integrity, not the authenticated readback. CI checks local integrity only.
+The workflow above is a draft check: it verifies package integrity but accepts development provenance.
+There is no automated final-release workflow. After the canonical source is approved and integrated,
+use this release sequence:
+
+1. In an authenticated corporate Tracker checkout, fetch the full 40-character source commit. Read
+   each of the three canonical files from that commit and compare its SHA-256 with the candidate bytes.
+   For example:
+
+   ```sh
+   git -C <tracker-checkout> show <source-commit>:agent-integrations/shared/skills/vammo-work-tracker-writing/SKILL.md | shasum -a 256
+   ```
+
+   Repeat for `references/english-ste.md` and `references/portuguese-writing.md`.
+2. After all three hashes match, set `sourceRevision` in `writing-source.json` to that full commit and
+   `sourceStatus` to `published`. A new sync resets both fields to development provenance.
+3. Run the source and package checks, then the final release gate:
+
+   ```sh
+   node plugins/vammo-work-tracker/scripts/sync-writing-skill.mjs --source <tracker-checkout> --check
+   node plugins/vammo-work-tracker/scripts/sync-writing-skill.mjs --verify-package --require-published
+   ```
+
+   The final command is the documented release-readiness entry point. It checks the declaration and
+   package integrity; it does not prove authenticated readback.
+4. Complete the independent source and package review. Publish only through the separately authorized
+   release process.
+5. After publication, install the approved package, restart each client, and check its installed
+   version, loaded skill, and a real draft separately. Keep the prior full package/ref until rollback
+   has been checked in a temporary profile.
+
+CI checks local integrity only. The sync command cannot self-claim publication.
 
 For rollback, retain the previous full plugin package/ref before updating. Restore it in a temporary
 profile first, then use the authorized client update mechanism and a new session. Rollback changes

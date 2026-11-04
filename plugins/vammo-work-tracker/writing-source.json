@@ -7,12 +7,12 @@
     {
       "sourcePath": "agent-integrations/shared/skills/vammo-work-tracker-writing/SKILL.md",
       "targetPath": "skills/vammo-work-tracker-writing/SKILL.md",
-      "sha256": "d1072aab4379660579a948872e7b3ed8796ec50116788a330757e073a1986d69"
+      "sha256": "4e0555a657f3d71b9b93e27b12c52cdc4d9d250df172336af18f2373a9d125f4"
     },
     {
       "sourcePath": "agent-integrations/shared/skills/vammo-work-tracker-writing/references/english-ste.md",
       "targetPath": "skills/vammo-work-tracker-writing/references/english-ste.md",
-      "sha256": "176509fea648ebde0b12f0cda2e4174abc2fcea5e666bdba390852e482fe4e46"
+      "sha256": "554768f046d4f99d20116df163b058be335f524a2d211e1a42f891be17e41dd3"
     },
     {
       "sourcePath": "agent-integrations/shared/skills/vammo-work-tracker-writing/references/portuguese-writing.md",
