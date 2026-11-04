@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "vammo-apps": {
+      "type": "http",
+      "url": "https://api.apps.vammo.com/mcp",
+      "headers": {
+        "X-Vammo-Plugin": "vammo-apps@1.1.0"
+      },
+      "http_headers": {
+        "X-Vammo-Plugin": "vammo-apps@1.1.0"
+      }
+    }
+  }
+}
