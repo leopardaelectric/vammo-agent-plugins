@@ -1,8 +1,8 @@
 {
   "contractId": "vammo.work-tracker-writing",
   "sourceRepository": "leopardaelectric/vammo-work-tracker",
-  "sourceRevision": "WORKTREE",
-  "sourceStatus": "development",
+  "sourceRevision": "b02a968db7457129fcf4970091e8618d7e44e27b",
+  "sourceStatus": "published",
   "files": [
     {
       "sourcePath": "agent-integrations/shared/skills/vammo-work-tracker-writing/SKILL.md",

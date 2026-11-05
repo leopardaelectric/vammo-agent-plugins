@@ -115,8 +115,10 @@ The November 4 review update carries the final November 3 local writing correcti
 six synthetic native outputs received five partial grades and one pass in independent review.
 English vocabulary/construction faults and technical-term evidence remain open; package integrity
 does not establish editorial acceptance. The source review must resolve or explicitly accept these
-limits before publication. The package remains `WORKTREE` / `development` until approved canonical
-integration and authenticated immutable readback. No private test output or official manual is bundled.
+limits before publication. Release provenance requires approved canonical integration and
+authenticated immutable readback, recorded in `writing-source.json`. A `published` source status
+describes the canonical source, not native-client or editorial acceptance. No private test output
+or official manual is bundled.
 
 After an authorized release, update and restart:
 
