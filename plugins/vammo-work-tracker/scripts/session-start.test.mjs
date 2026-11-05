@@ -24,7 +24,12 @@ for (const scenario of ['included', 'excluded', 'unmatched', 'missing scope file
     assert.equal(result.status, 0, result.stderr);
     const [verdict, reminder, ...extra] = result.stdout.trim().split('\n');
     const tracked = scenario === 'included' || scenario === 'missing scope file';
-    assert.match(verdict, tracked ? /^Vammo Work Tracker is connected/ : /^Vammo Work Tracker: tracking is off/);
+    assert.match(verdict, tracked ? /^Vammo Work Tracker is configured/ : /^Vammo Work Tracker: tracking is off/);
+    if (tracked) {
+      assert.doesNotMatch(verdict, /is connected/);
+      assert.match(verdict, /first start a new session; if they are still missing, the MCP login may be missing/);
+      assert.match(verdict, /codex mcp login vammo in that same CODEX_HOME/);
+    }
     if (!tracked) assert.match(verdict, /Do not track this session/);
     assert.match(reminder ?? '', /vammo-work-tracker-writing/);
     assert.match(reminder, /does not authorize saving or tracking/);

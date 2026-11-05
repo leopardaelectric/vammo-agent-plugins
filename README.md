@@ -27,6 +27,12 @@ codex plugin add vammo-work-tracker@vammo
 codex mcp login vammo
 ```
 
+In Codex, an MCP server that is not logged in shows no tools and gives no sign-in prompt. If the `vammo` tools are missing from a session, first start a new session. If they are still missing, the MCP login may be missing for that session's `CODEX_HOME`: run `codex mcp login vammo` in that same `CODEX_HOME` and start a new session.
+
+Where the login is kept depends on `mcp_oauth_credentials_store` in the Codex `config.toml`:
+- `"file"`: the login is stored in the `CODEX_HOME` where you ran `codex mcp login`. Apps such as Orca run Codex with one `CODEX_HOME` per account, so each account, including one added later, needs its own login: `CODEX_HOME=<that home> codex mcp login vammo`.
+- `"keyring"`: the login is stored in the operating system's credential store, keyed by server name and URL, not by `CODEX_HOME`. One login serves every `CODEX_HOME` on the machine, including homes created later (verified with Codex CLI 0.166.0 on macOS; on Linux it needs a Secret Service provider such as GNOME Keyring). If sessions from different homes renew the same expired token at the same moment, one of them can lose the server for that session; a new session works without a new login.
+
 ### For the whole organization (Claude Team or Enterprise)
 
 An Owner adds this to **claude.ai → Organization settings → Claude Code → Managed settings**. Every member who uses Claude Code with the organization account then gets the plugin installed and enabled automatically:

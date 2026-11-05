@@ -109,6 +109,16 @@ production changes; deployment evidence does that.
 - **Sign-in needed:** ask the person to sign in.
   - Claude Code: `/mcp`, then Authenticate for vammo.
   - Codex: `codex mcp login vammo`.
+- **Codex, `vammo` tools missing:** Codex lists no tools for an MCP server that is not logged in,
+  so no tool can ask for sign-in. Do not wait for one. First ask the person to start a new
+  session; a session can lose the server on its own, for example in a refresh race between homes.
+  If the tools are still missing, the MCP login may be missing for this home: ask the person to
+  run `codex mcp login vammo` in that same `CODEX_HOME`, then start a new session.
+  - Apps such as Orca run Codex with one `CODEX_HOME` per account. With
+    `mcp_oauth_credentials_store = "file"`, each home keeps its own login, so each account needs
+    its own `codex mcp login vammo`.
+  - With `mcp_oauth_credentials_store = "keyring"`, one login serves every home on the machine
+    (verified with Codex CLI 0.166.0).
 - **Otherwise:** keep working.
   - Tell the person that tracking is pending.
   - Keep at most 100 short pending summaries in `pending.json` next to the state file, for up to
