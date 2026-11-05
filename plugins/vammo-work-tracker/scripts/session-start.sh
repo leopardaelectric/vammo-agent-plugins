@@ -35,7 +35,7 @@ if [ -f "$scope_file" ]; then
 fi
 
 if [ "$tracked" = yes ]; then
-  echo 'Vammo Work Tracker is connected (MCP server vammo). For any coding task, follow the vammo-work-tracking skill: get_context, then ensure_work_item and start_work_session, link_code after each push or pull request, record_progress at milestones and finish_work_session at the end. If a vammo tool reports that sign-in is needed, ask the person to run /mcp and choose Authenticate for vammo.'
+  echo 'Vammo Work Tracker is configured (MCP server vammo). For any coding task, follow the vammo-work-tracking skill: get_context, then ensure_work_item and start_work_session, link_code after each push or pull request, record_progress at milestones and finish_work_session at the end. If a vammo tool reports that sign-in is needed, ask the person to run /mcp and choose Authenticate for vammo. In Codex, if the vammo tools are missing from the session, first start a new session; if they are still missing, the MCP login may be missing for this Codex home, so the person runs codex mcp login vammo in that same CODEX_HOME and starts a new session.'
 else
   echo "Vammo Work Tracker: tracking is off for this folder ($dir) by $scope_file. Do not track this session (no ensure_work_item, start_work_session, link_code, record_progress or finish_work_session) unless the person explicitly asks to track this work; if they ask to track this folder from now on, follow the Tracking scope section of the vammo-work-tracking skill. The vammo tools stay available for anything else the person asks."
 fi
