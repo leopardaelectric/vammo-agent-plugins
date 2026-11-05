@@ -35,6 +35,15 @@ wins. Paths compare without case; `C:\vammo` and `C:/vammo` are the same.
   (create the file if it is missing). When they ask to stop tracking one, add `!` and its path, or
   remove the line that included it. Tell them the line you changed.
 
+## Writing WorkItems and Requests
+
+Before drafting or materially reviewing titles, descriptions, scope, acceptance criteria, triage
+questions or progress notes, use **vammo-work-tracker-writing**. It is included in this plugin.
+English is recommended; an explicit language request wins, and revisions preserve the existing
+language. A requested draft is available even with tracking off and does not authorize saving,
+submission or session tracking. Preserve the human description and criteria when adding progress.
+All existing host permissions, confirmations, transitions and completion rules remain in force.
+
 ## At the start of a task
 
 1. Check the tracking scope. Out of scope, stop here.

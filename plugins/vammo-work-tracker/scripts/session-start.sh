@@ -39,3 +39,5 @@ if [ "$tracked" = yes ]; then
 else
   echo "Vammo Work Tracker: tracking is off for this folder ($dir) by $scope_file. Do not track this session (no ensure_work_item, start_work_session, link_code, record_progress or finish_work_session) unless the person explicitly asks to track this work; if they ask to track this folder from now on, follow the Tracking scope section of the vammo-work-tracking skill. The vammo tools stay available for anything else the person asks."
 fi
+
+echo 'When a task involves drafting or materially reviewing Work Tracker content, use vammo-work-tracker-writing. Drafting does not authorize saving or tracking an out-of-scope session; existing permissions and confirmations still apply.'

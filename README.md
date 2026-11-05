@@ -6,6 +6,7 @@ Plugins that connect Claude Code and Codex to Vammo systems. The repository is p
 
 The plugin installs:
 - the remote MCP server of the [Vammo Work Tracker](https://work.vammo.com) (`https://services.vammo.com/ms-work-tracker/mcp`, Vammo sign-in);
+- the `vammo-work-tracker-writing` skill for drafting and materially reviewing WorkItems and Requests, including business tasks and unsaved drafts;
 - the `vammo-work-tracking` skill, which tracks every coding task: work item, session, progress, and the branch, commits and pull requests behind it;
 - in Claude Code and Codex, a session-start reminder so tracking happens without being asked, only in the folders you choose (see [Tracking only work folders](#tracking-only-work-folders)).
 
@@ -83,6 +84,106 @@ Bump `version` in the plugin's `.claude-plugin/plugin.json` and in `.claude-plug
 claude plugin validate ./plugins/vammo-work-tracker
 claude plugin validate .
 ```
+
+### Writing WorkItems and Requests (candidate 1.3.0)
+
+Ask normally to draft or materially review a Work Tracker title, description, scope, acceptance
+criteria, triage question or progress note. For explicit invocation, use
+`/vammo-work-tracker:vammo-work-tracker-writing` in Claude Code or
+`$vammo-work-tracker-writing` in Codex.
+
+English is recommended for new cards without a language choice. Explicit language requests win;
+revisions preserve the existing language. A Portuguese conversation or source notes alone do not
+choose the new card's language; an explicit request such as “em português” does. Portuguese is
+accepted immediately and uses an identified clarity adaptation of ASD-STE100. English uses the official
+English standard, with rule and dictionary verification recorded separately from card text. No template
+or language rule blocks intake.
+The English guide requires a per-artifact word/form/construction review using permitted access to
+the official manual. Its editing examples do not replace that manual, which is not bundled. If
+normative access is unavailable, drafting continues with verification pending; no compliance claim follows.
+
+The writing skill can draft in a folder with tracking off. A draft does not authorize saving,
+submission or session tracking. Progress notes add to human descriptions and criteria. The hook
+only supplies a reminder; discovery, loading, hook execution and behavior are separate checks.
+Native trust or managed policy can prevent the local candidate from loading.
+Native project, owner, priority, type and status already supplied by the host stay outside the
+entire draft delivery, including separate metadata blocks, introductions and recaps. Keep an
+actionable dependency on another project. A comparison does not add a purchase decision; an
+observation-only progress note does not add instructions from the existing criteria.
+
+The November 4 review update carries the final November 3 local writing corrections. The recorded
+six synthetic native outputs received five partial grades and one pass in independent review.
+English vocabulary/construction faults and technical-term evidence remain open; package integrity
+does not establish editorial acceptance. The source review must resolve or explicitly accept these
+limits before publication. Release provenance requires approved canonical integration and
+authenticated immutable readback, recorded in `writing-source.json`. A `published` source status
+describes the canonical source, not native-client or editorial acceptance. No private test output
+or official manual is bundled.
+
+After an authorized release, update and restart:
+
+```sh
+claude plugin marketplace update vammo
+claude plugin update vammo-work-tracker@vammo
+codex plugin marketplace upgrade vammo
+```
+
+Check the installed version, loaded skill and a real draft separately. These commands do not prove
+organization-wide adoption. Hook changes can require native trust again.
+
+### Maintaining the generated writing skill
+
+The three writing files are canonical in the Tracker repository at
+`agent-integrations/shared/skills/vammo-work-tracker-writing/`. Edit that source first. In this repo:
+
+```sh
+node plugins/vammo-work-tracker/scripts/sync-writing-skill.mjs --source <tracker-checkout>
+node plugins/vammo-work-tracker/scripts/sync-writing-skill.mjs --source <tracker-checkout> --check
+node plugins/vammo-work-tracker/scripts/sync-writing-skill.mjs --verify-package
+node --test plugins/vammo-work-tracker/scripts/*.test.mjs
+```
+
+Sync copies only `SKILL.md` and its English/Portuguese references, without network access. It emits
+`WORKTREE` / `development` provenance in `writing-source.json`. `--check` compares supplied source
+bytes and package hashes; `--verify-package` checks local integrity, not authenticated upstream
+origin. Neither command changes the source repository or other plugin files. Unknown files are
+preserved; package verification refuses unmanifested files inside the writing skill.
+
+The workflow above is a draft check: it verifies package integrity but accepts development provenance.
+There is no automated final-release workflow. After the canonical source is approved and integrated,
+use this release sequence:
+
+1. In an authenticated corporate Tracker checkout, fetch the full 40-character source commit. Read
+   each of the three canonical files from that commit and compare its SHA-256 with the candidate bytes.
+   For example:
+
+   ```sh
+   git -C <tracker-checkout> show <source-commit>:agent-integrations/shared/skills/vammo-work-tracker-writing/SKILL.md | shasum -a 256
+   ```
+
+   Repeat for `references/english-ste.md` and `references/portuguese-writing.md`.
+2. After all three hashes match, set `sourceRevision` in `writing-source.json` to that full commit and
+   `sourceStatus` to `published`. A new sync resets both fields to development provenance.
+3. Run the source and package checks, then the final release gate:
+
+   ```sh
+   node plugins/vammo-work-tracker/scripts/sync-writing-skill.mjs --source <tracker-checkout> --check
+   node plugins/vammo-work-tracker/scripts/sync-writing-skill.mjs --verify-package --require-published
+   ```
+
+   The final command is the documented release-readiness entry point. It checks the declaration and
+   package integrity; it does not prove authenticated readback.
+4. Complete the independent source and package review. Publish only through the separately authorized
+   release process.
+5. After publication, install the approved package, restart each client, and check its installed
+   version, loaded skill, and a real draft separately. Keep the prior full package/ref until rollback
+   has been checked in a temporary profile.
+
+CI checks local integrity only. The sync command cannot self-claim publication.
+
+For rollback, retain the previous full plugin package/ref before updating. Restore it in a temporary
+profile first, then use the authorized client update mechanism and a new session. Rollback changes
+plugin instructions, never cards. General managed rollout and managed rollback need separate approval.
 
 ## vammo-claude-skills
 

@@ -1,0 +1,23 @@
+{
+  "contractId": "vammo.work-tracker-writing",
+  "sourceRepository": "leopardaelectric/vammo-work-tracker",
+  "sourceRevision": "b02a968db7457129fcf4970091e8618d7e44e27b",
+  "sourceStatus": "published",
+  "files": [
+    {
+      "sourcePath": "agent-integrations/shared/skills/vammo-work-tracker-writing/SKILL.md",
+      "targetPath": "skills/vammo-work-tracker-writing/SKILL.md",
+      "sha256": "4e0555a657f3d71b9b93e27b12c52cdc4d9d250df172336af18f2373a9d125f4"
+    },
+    {
+      "sourcePath": "agent-integrations/shared/skills/vammo-work-tracker-writing/references/english-ste.md",
+      "targetPath": "skills/vammo-work-tracker-writing/references/english-ste.md",
+      "sha256": "554768f046d4f99d20116df163b058be335f524a2d211e1a42f891be17e41dd3"
+    },
+    {
+      "sourcePath": "agent-integrations/shared/skills/vammo-work-tracker-writing/references/portuguese-writing.md",
+      "targetPath": "skills/vammo-work-tracker-writing/references/portuguese-writing.md",
+      "sha256": "90ca662111b2ec4a406b62b3541f887ff8558b21904475ade1dddb69cad04a43"
+    }
+  ]
+}
