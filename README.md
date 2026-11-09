@@ -216,17 +216,20 @@ Then, before every pull request: when Claude is about to open a PR (`gh pr creat
 2. It fixes the findings with claude-security's own patches. Before a patch is written, independent agents check that it closes the finding, introduces no new vulnerability and leaves behaviour unchanged. A finding it won't patch is the one point where Claude stops and asks the person.
 3. It commits and pushes the fixes as one commit.
 4. It records the result as a check on the Vammo Work Tracker work item, when one is active.
-5. It opens the PR with a short "Security pre-check" section in the body.
+5. It marks the scanned commit on GitHub with a `vammo-security` commit status, using the person's own `gh` login.
+6. It opens the PR with a short "Security pre-check" section in the body.
 
 Coverage is kept per worktree in the git dir, so:
 
 - the same HEAD is never scanned twice;
 - a later push scans only the new commits.
 
+To require the check before merge, add `vammo-security` as a required status check in the default branch's ruleset (or branch protection), with Dependabot and the security owner in the bypass list. A PR opened outside Claude Code, or with commits pushed after the scan, then can't be merged until the branch goes through the check: asking Claude to run `pre-pr-security` on the branch scans just the new commits and marks the new HEAD. The status says the check ran, not that it found nothing; the counts are in its description and in the PR summary. Anyone with write access can set a commit status by hand, so treat it as a guard against forgetting, not against intent: GitHub records who set each status.
+
 The scan runs on the person's own Claude Code plan, so there is no per-PR CI cost. Measured on 2026-10-23 at medium effort:
 
 - a clean branch takes about 3–4 minutes;
-- a branch with findings takes longer. A 28-line branch with 3 planted vulnerabilities took 17 minutes end to end (about $8.8 at list price): about 4 minutes of scan, and the rest building and verifying the 3 patches. This is a guide, not a gate: a PR opened outside Claude Code isn't checked.
+- a branch with findings takes longer. A 28-line branch with 3 planted vulnerabilities took 17 minutes end to end (about $8.8 at list price): about 4 minutes of scan, and the rest building and verifying the 3 patches. These times are a guide, not a limit.
 
 Claude Code only. It needs Python 3 (claude-security needs it too).
 

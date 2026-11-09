@@ -41,6 +41,8 @@ Subcommands:
   cover REPORT_DIR      Records HEAD as covered by the claude-security scan in REPORT_DIR.
   accept-secret ID WHY  Records an unverified secret hit as a false positive.
   summary               Prints the "Security pre-check" section for the PR body.
+  status                Marks the covered, pushed HEAD on GitHub with the `vammo-security` commit
+                        status, which a branch rule can require before merge.
 
 Scope: every repository with a remote on github.com/leopardaelectric, and nothing else.
 There is no opt-out switch. The person's only exception is accepting an unverified secret
@@ -859,6 +861,55 @@ def cmd_summary() -> int:
     return 0
 
 
+# The commit status a branch rule requires: it says the commit went through this check.
+STATUS_CONTEXT = "vammo-security"
+
+
+def pushed_repo(top: str, head: str) -> str | None:
+    """owner/name of a Vammo remote whose fetched branches already contain head."""
+    refs = git(top, "for-each-ref", "--contains", head, "--format=%(refname:strip=2)", "refs/remotes").split()
+    for remote in sorted({r.split("/", 1)[0] for r in refs}):
+        try:
+            m = GITHUB_REMOTE.search(git(top, "remote", "get-url", remote))
+        except RuntimeError:
+            continue
+        if m and m.group(1).lower() == VAMMO_OWNER:
+            return f"{m.group(1)}/{m.group(2)}"
+    return None
+
+
+def gh_api(*args: str) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(["gh", "api", *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise SystemExit(f"couldn't run the GitHub CLI (gh): {e}")
+
+
+def cmd_status() -> int:
+    top = git(os.getcwd(), "rev-parse", "--show-toplevel")
+    head = git(top, "rev-parse", "HEAD")
+    data = load(top)
+    entry = data.get("covered", {}).get(head)
+    if not entry or entry.get("skipped"):
+        raise SystemExit(f"HEAD {head[:12]} is not covered yet; scan it and run `cover` first")
+    repo = pushed_repo(top, head)
+    if not repo:
+        raise SystemExit(f"HEAD {head[:12]} isn't on a leopardaelectric remote yet; push the branch "
+                         "(`git push -u origin HEAD`), then run `status` again")
+    f = entry.get("findings", {})
+    counts = ", ".join(f"{n} {s}" for s, n in f.items() if n) or "no findings"
+    patched = f", {len(entry['patched'])} patched" if entry.get("patched") else ""
+    description = f"claude-security {entry.get('effort')}: {counts}{patched}"[:140]
+    out = gh_api("--method", "POST", f"repos/{repo}/statuses/{head}", "-f", "state=success",
+                 "-f", f"context={STATUS_CONTEXT}", "-f", f"description={description}")
+    if out.returncode != 0:
+        raise SystemExit(f"GitHub didn't take the status for {head[:12]} on {repo}: {out.stderr.strip()[-300:]}")
+    data.setdefault("status_posted", {})[head] = now()
+    save(top, data)
+    print(f"marked {head[:12]} on {repo} as checked ({STATUS_CONTEXT})")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__)
@@ -874,6 +925,8 @@ def main(argv: list[str]) -> int:
         return cmd_base()
     if cmd == "summary":
         return cmd_summary()
+    if cmd == "status":
+        return cmd_status()
     print(__doc__)
     return 2
 

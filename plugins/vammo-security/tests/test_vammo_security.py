@@ -433,6 +433,71 @@ class SaveState(TempDirs):
         self.assertEqual(self.leftovers(), [])
 
 
+class Status(TempDirs):
+    def setUp(self) -> None:
+        super().setUp()
+        self.git_repo(self.session, "https://github.com/leopardaelectric/session-repo.git", commit=True)
+        self.head = vs.git(self.session, "rev-parse", "HEAD")
+        cwd = mock.patch.object(os, "getcwd", return_value=self.session)
+        cwd.start()
+        self.addCleanup(cwd.stop)
+
+    def cover(self, **extra) -> None:
+        entry = {"effort": "medium", "findings": {"critical": 0, "high": 1, "medium": 0, "low": 0}, **extra}
+        vs.save(self.session, {"covered": {self.head: entry}})
+
+    def push(self, remote: str = "origin") -> None:
+        subprocess.run(["git", "-C", self.session, "update-ref", f"refs/remotes/{remote}/br", self.head],
+                       check=True, env=GIT_ENV)
+
+    def test_marks_the_covered_pushed_head(self) -> None:
+        self.cover(patched=["F1"])
+        self.push()
+        gh = mock.MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+        with mock.patch.object(vs, "gh_api", gh):
+            self.assertEqual(vs.cmd_status(), 0)
+        args = gh.call_args.args
+        self.assertIn(f"repos/leopardaelectric/session-repo/statuses/{self.head}", args)
+        self.assertIn("state=success", args)
+        self.assertIn("context=vammo-security", args)
+        self.assertIn("description=claude-security medium: 1 high, 1 patched", args)
+        self.assertIn(self.head, vs.load(self.session)["status_posted"])
+
+    def test_refuses_a_head_that_is_not_covered(self) -> None:
+        self.push()
+        for state in ({}, {"covered": {self.head: {"skipped": True}}}):
+            vs.save(self.session, state)
+            with mock.patch.object(vs, "gh_api") as gh, self.assertRaises(SystemExit) as e:
+                vs.cmd_status()
+            self.assertIn("not covered", str(e.exception))
+            gh.assert_not_called()
+
+    def test_refuses_a_head_that_is_not_pushed(self) -> None:
+        self.cover()
+        with mock.patch.object(vs, "gh_api") as gh, self.assertRaises(SystemExit) as e:
+            vs.cmd_status()
+        self.assertIn("push the branch", str(e.exception))
+        gh.assert_not_called()
+
+    def test_ignores_a_push_to_a_remote_outside_vammo(self) -> None:
+        self.cover()
+        subprocess.run(["git", "-C", self.session, "remote", "add", "fork",
+                        "https://github.com/someone/session-repo.git"], check=True, env=GIT_ENV)
+        self.push("fork")
+        with mock.patch.object(vs, "gh_api") as gh, self.assertRaises(SystemExit):
+            vs.cmd_status()
+        gh.assert_not_called()
+
+    def test_reports_a_github_refusal(self) -> None:
+        self.cover()
+        self.push()
+        refused = mock.MagicMock(return_value=subprocess.CompletedProcess([], 1, "", "HTTP 422: No commit found"))
+        with mock.patch.object(vs, "gh_api", refused), self.assertRaises(SystemExit) as e:
+            vs.cmd_status()
+        self.assertIn("No commit found", str(e.exception))
+        self.assertNotIn("status_posted", vs.load(self.session))
+
+
 class Install(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
