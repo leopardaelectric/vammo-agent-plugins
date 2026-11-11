@@ -1,0 +1,372 @@
+{
+  "now": "2026-01-15T12:00:00Z",
+  "source": "Synthetic fixture: fictitious keys and repositories, one item per rule.",
+  "items": [
+    {
+      "key": "TEST-1",
+      "title": "CI-only change kept as PRODUCTION",
+      "type": "MAINTENANCE",
+      "phase": "IN_PROGRESS",
+      "completionPolicy": "PRODUCTION",
+      "updatedAt": "2026-01-05T10:00:00Z",
+      "project": null,
+      "blocked": false,
+      "deliveryScopeStatus": "AWAITING_SCOPE",
+      "prs": [
+        {
+          "repo": "example/ci",
+          "number": 1,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-06T10:00:00Z",
+          "authorIsAssignee": true
+        }
+      ],
+      "availableActions": [
+        "edit",
+        "editDeliveryScope",
+        "transition:request_review",
+        "transition:cancel"
+      ]
+    },
+    {
+      "key": "TEST-2",
+      "title": "Documentation awaiting review",
+      "type": "MAINTENANCE",
+      "phase": "IN_PROGRESS",
+      "completionPolicy": "REVIEWED_DELIVERABLE",
+      "updatedAt": "2026-01-05T10:00:00Z",
+      "project": "DOCS",
+      "blocked": false,
+      "deliveryScopeStatus": null,
+      "prs": [
+        {
+          "repo": "example/docs",
+          "number": 2,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-06T10:00:00Z",
+          "authorIsAssignee": true
+        }
+      ],
+      "availableActions": [
+        "edit",
+        "transition:request_review",
+        "transition:cancel"
+      ]
+    },
+    {
+      "key": "TEST-3",
+      "title": "Analysis delivered",
+      "type": "ANALYSIS",
+      "phase": "IN_PROGRESS",
+      "completionPolicy": "DELIVERABLE",
+      "updatedAt": "2026-01-12T10:00:00Z",
+      "project": "DOCS",
+      "blocked": false,
+      "deliveryScopeStatus": null,
+      "prs": [
+        {
+          "repo": "example/docs",
+          "number": 3,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-13T10:00:00Z",
+          "authorIsAssignee": true
+        }
+      ],
+      "availableActions": [
+        "edit",
+        "transition:complete_deliverable",
+        "transition:cancel"
+      ]
+    },
+    {
+      "key": "TEST-4",
+      "title": "Bug fix merged",
+      "type": "BUG",
+      "phase": "IN_PROGRESS",
+      "completionPolicy": "DELIVERABLE",
+      "updatedAt": "2026-01-12T10:00:00Z",
+      "project": "SVC",
+      "blocked": false,
+      "deliveryScopeStatus": null,
+      "prs": [
+        {
+          "repo": "example/service",
+          "number": 4,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-13T10:00:00Z",
+          "authorIsAssignee": true
+        }
+      ],
+      "availableActions": [
+        "transition:complete_deliverable"
+      ]
+    },
+    {
+      "key": "TEST-5",
+      "title": "Fix with a forgotten PR",
+      "type": "BUG",
+      "phase": "IN_PROGRESS",
+      "completionPolicy": "PRODUCTION",
+      "updatedAt": "2026-01-02T10:00:00Z",
+      "project": "SVC",
+      "blocked": false,
+      "deliveryScopeStatus": "NONE",
+      "prs": [
+        {
+          "repo": "example/service",
+          "number": 5,
+          "state": "OPEN",
+          "draft": false,
+          "updatedAt": "2026-01-03T10:00:00Z",
+          "authorIsAssignee": true
+        }
+      ]
+    },
+    {
+      "key": "TEST-6",
+      "title": "Idea without code",
+      "type": "FEATURE",
+      "phase": "IN_PROGRESS",
+      "completionPolicy": "PRODUCTION",
+      "updatedAt": "2026-01-08T10:00:00Z",
+      "project": "SVC",
+      "blocked": false,
+      "deliveryScopeStatus": null,
+      "prs": []
+    },
+    {
+      "key": "TEST-7",
+      "title": "Created today",
+      "type": "FEATURE",
+      "phase": "TODO",
+      "completionPolicy": "PRODUCTION",
+      "updatedAt": "2026-01-14T10:00:00Z",
+      "project": "SVC",
+      "blocked": false,
+      "deliveryScopeStatus": null,
+      "prs": []
+    },
+    {
+      "key": "TEST-8",
+      "title": "Waiting on another team",
+      "type": "FEATURE",
+      "phase": "IN_PROGRESS",
+      "completionPolicy": "PRODUCTION",
+      "updatedAt": "2026-01-10T10:00:00Z",
+      "project": "SVC",
+      "blocked": true,
+      "deliveryScopeStatus": null,
+      "prs": [
+        {
+          "repo": "example/service",
+          "number": 8,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-11T10:00:00Z",
+          "authorIsAssignee": true
+        }
+      ]
+    },
+    {
+      "key": "TEST-9",
+      "title": "Coordinate a change another person shipped",
+      "type": "OPERATIONS",
+      "phase": "TODO",
+      "completionPolicy": "DELIVERABLE",
+      "updatedAt": "2026-01-05T10:00:00Z",
+      "project": "OPS",
+      "blocked": false,
+      "deliveryScopeStatus": null,
+      "prs": [
+        {
+          "repo": "example/service",
+          "number": 9,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-06T10:00:00Z",
+          "authorIsAssignee": false
+        }
+      ]
+    },
+    {
+      "key": "TEST-10",
+      "title": "Feature merged, waiting for deploy",
+      "type": "FEATURE",
+      "phase": "INTEGRATED",
+      "completionPolicy": "PRODUCTION",
+      "updatedAt": "2026-01-12T10:00:00Z",
+      "project": "SVC",
+      "blocked": false,
+      "deliveryScopeStatus": "CONFIRMED",
+      "prs": [
+        {
+          "repo": "example/service",
+          "number": 10,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-12T10:00:00Z",
+          "authorIsAssignee": true
+        }
+      ]
+    },
+    {
+      "key": "TEST-11",
+      "title": "Review in progress",
+      "type": "REVIEW",
+      "phase": "IN_REVIEW",
+      "completionPolicy": "DELIVERABLE",
+      "updatedAt": "2026-01-14T10:00:00Z",
+      "project": "OPS",
+      "blocked": false,
+      "deliveryScopeStatus": null,
+      "prs": []
+    },
+    {
+      "key": "TEST-12",
+      "title": "Large feature in flight",
+      "type": "FEATURE",
+      "phase": "IN_PROGRESS",
+      "completionPolicy": "PRODUCTION",
+      "updatedAt": "2026-01-14T10:00:00Z",
+      "project": null,
+      "blocked": false,
+      "deliveryScopeStatus": "UNCONFIRMED",
+      "prs": [
+        {
+          "repo": "example/service",
+          "number": 20,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-10T10:00:00Z",
+          "authorIsAssignee": true
+        },
+        {
+          "repo": "example/service",
+          "number": 21,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-10T10:00:00Z",
+          "authorIsAssignee": true
+        },
+        {
+          "repo": "example/service",
+          "number": 22,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-10T10:00:00Z",
+          "authorIsAssignee": true
+        },
+        {
+          "repo": "example/service",
+          "number": 23,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-10T10:00:00Z",
+          "authorIsAssignee": true
+        },
+        {
+          "repo": "example/service",
+          "number": 24,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-10T10:00:00Z",
+          "authorIsAssignee": true
+        },
+        {
+          "repo": "example/service",
+          "number": 25,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-10T10:00:00Z",
+          "authorIsAssignee": true
+        },
+        {
+          "repo": "example/service",
+          "number": 26,
+          "state": "OPEN",
+          "draft": true,
+          "updatedAt": "2026-01-14T10:00:00Z",
+          "authorIsAssignee": true
+        },
+        {
+          "repo": "example/service",
+          "number": 5,
+          "state": "OPEN",
+          "draft": false,
+          "updatedAt": "2026-01-03T10:00:00Z",
+          "authorIsAssignee": true
+        }
+      ]
+    },
+    {
+      "key": "TEST-13",
+      "title": "Attempt that was dropped",
+      "type": "FEATURE",
+      "phase": "IN_PROGRESS",
+      "completionPolicy": "PRODUCTION",
+      "updatedAt": "2026-01-05T10:00:00Z",
+      "project": "SVC",
+      "blocked": false,
+      "deliveryScopeStatus": null,
+      "prs": [
+        {
+          "repo": "example/service",
+          "number": 13,
+          "state": "CLOSED",
+          "draft": false,
+          "updatedAt": "2026-01-06T10:00:00Z",
+          "authorIsAssignee": true
+        }
+      ]
+    },
+    {
+      "key": "TEST-14",
+      "title": "Started and merged without moving",
+      "type": "FEATURE",
+      "phase": "TODO",
+      "completionPolicy": "DELIVERABLE",
+      "updatedAt": "2026-01-12T10:00:00Z",
+      "project": "SVC",
+      "blocked": false,
+      "deliveryScopeStatus": null,
+      "prs": [
+        {
+          "repo": "example/service",
+          "number": 14,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-13T10:00:00Z",
+          "authorIsAssignee": true
+        }
+      ],
+      "availableActions": [
+        "transition:start"
+      ]
+    },
+    {
+      "key": "TEST-15",
+      "title": "Merged PR with unknown author",
+      "type": "FEATURE",
+      "phase": "IN_PROGRESS",
+      "completionPolicy": "DELIVERABLE",
+      "updatedAt": "2026-01-12T10:00:00Z",
+      "project": "SVC",
+      "blocked": false,
+      "deliveryScopeStatus": null,
+      "prs": [
+        {
+          "repo": "example/service",
+          "number": 15,
+          "state": "MERGED",
+          "draft": false,
+          "updatedAt": "2026-01-13T10:00:00Z",
+          "authorIsAssignee": null
+        }
+      ]
+    }
+  ]
+}
