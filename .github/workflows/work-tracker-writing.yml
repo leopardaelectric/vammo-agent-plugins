@@ -20,3 +20,5 @@ jobs:
         run: node --test plugins/vammo-work-tracker/scripts/*.test.mjs
       - name: Verify distributed file integrity
         run: node plugins/vammo-work-tracker/scripts/sync-writing-skill.mjs --verify-package
+      - name: Test the work review classifier
+        run: python3 plugins/vammo-work-tracker/tests/test_work_review_classify.py
