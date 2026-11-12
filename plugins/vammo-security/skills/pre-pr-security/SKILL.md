@@ -1,6 +1,6 @@
 ---
 name: pre-pr-security
-description: Vammo pre-PR security check. Before a pull request is opened, scan the branch's changes with the claude-security plugin at medium effort, fix every finding with its verified patches, commit and push the fixes, record coverage and the result on the Work Tracker, and then open the PR. Use when the vammo-security hook holds a PR creation, or when the person asks for a security check before a PR.
+description: Vammo pre-PR security check. Before a pull request is opened, scan the branch's changes with the claude-security plugin at medium effort, fix every finding with its verified patches, commit and push the fixes, record coverage and the result on the Work Tracker, mark the commit on GitHub with the `vammo-security` status, and then open the PR. Use when the vammo-security hook holds a PR creation, when a PR's `vammo-security` check is missing, or when the person asks for a security check before a PR.
 allowed-tools:
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vammo_security.py" *)
   - Bash(git *)
@@ -31,6 +31,8 @@ Run `git status --porcelain --untracked-files=no`.
 2. Invoke the `claude-security:claude-security` skill with arguments in this shape:
 
    `scan changes --base <base> --effort medium — the time and token cost are accepted, do not ask`
+
+   That acknowledgment is the person's own. Every Vammo engineer accepted this scan's time and token cost when the team made it mandatory on every PR, and asking for the PR is their request for it. So claude-security's start confirmation ("This scan may take a while… Are you sure you want to continue?") is already answered "Yes": never ask it. An unanswered confirmation stops the scan and leaves the PR stuck.
 
    Let it run to the end; it reports when the report is written.
 3. Find the newest `CLAUDE-SECURITY-*` directory at the repository root. This is REPORT.
@@ -65,7 +67,8 @@ Run `git status --porcelain --untracked-files=no`.
 ## 4. Record coverage and the result
 
 1. Run `STATE cover <REPORT>`. If it refuses, its message says why (for example, HEAD moved). Fix that, rescanning if needed. Never work around it.
-2. If a Vammo Work Tracker session is active for this work, call `record_progress` with `milestoneType: VERIFICATION`. The work-item and session ids are in the state file at `git rev-parse --git-path vammo-tracker/session.json`. Add one check:
+2. Push the branch if HEAD isn't on GitHub yet (`git push -u origin HEAD`), then run `STATE status`. It marks the covered commit on GitHub with the `vammo-security` status, which the repository's branch rule can require before merge. If it refuses, its message says why. Fix that and run it again. Never set the status any other way.
+3. If a Vammo Work Tracker session is active for this work, call `record_progress` with `milestoneType: VERIFICATION`. The work-item and session ids are in the state file at `git rev-parse --git-path vammo-tracker/session.json`. Add one check:
    - name: `claude-security pre-PR scan (medium)`
    - claimBasis: `AGENT_REPORTED`
    - result: `PASSED` when no CRITICAL or HIGH finding is left unfixed, otherwise `FAILED`
@@ -78,6 +81,8 @@ Run `git status --porcelain --untracked-files=no`.
 2. Create the PR the way you were about to, adding that output as a section at the end of the body.
 
 The HEAD is covered now, so the hook lets the PR through without another scan.
+
+If the pull request already exists (new commits were pushed to it, so its `vammo-security` check is missing), don't open another. Replace the old "Security pre-check" section of its body with the new summary (`gh pr edit <number> --body-file <file>`), and stop.
 
 ## When a gate reports secrets
 
@@ -92,4 +97,4 @@ Before a `git push` and before a PR, the hook runs TruffleHog on the commits bei
 
 ## No skipping
 
-There is no way to skip these checks, and the plugin has no off switch. If the person asks to skip, explain that the check runs on every PR to a Vammo repository, and offer to start it. A commit pushed after coverage isn't covered. The next PR creation scans just the new commits, through the incremental base in step 2.
+There is no way to skip these checks, and the plugin has no off switch. If the person asks to skip, explain that the check runs on every PR to a Vammo repository, and offer to start it. A commit pushed after coverage isn't covered, and the PR's `vammo-security` check stays missing until it is. Run this skill again on the branch: step 2 scans just the new commits, through the incremental base.
