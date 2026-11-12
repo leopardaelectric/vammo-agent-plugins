@@ -9,7 +9,7 @@
       "name": "vammo-work-tracker",
       "source": "./plugins/vammo-work-tracker",
       "description": "Vammo Work Tracker MCP server, work-tracking, work-review and writing skills, and a scoped session-start reminder.",
-      "version": "1.4.0"
+      "version": "1.5.0"
     },
     {
       "name": "vammo-apps",

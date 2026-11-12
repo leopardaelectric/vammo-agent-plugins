@@ -1,7 +1,7 @@
 {
   "name": "vammo-work-tracker",
   "displayName": "Vammo Work Tracker",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Connects Claude Code and Codex to Vammo Work Tracker with work tracking, work review and writing skills, plus a scoped session-start reminder.",
   "author": {
     "name": "Vammo"
