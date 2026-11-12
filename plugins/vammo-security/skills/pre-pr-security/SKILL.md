@@ -32,6 +32,8 @@ Run `git status --porcelain --untracked-files=no`.
 
    `scan changes --base <base> --effort medium — the time and token cost are accepted, do not ask`
 
+   That acknowledgment is the person's own. Every Vammo engineer accepted this scan's time and token cost when the team made it mandatory on every PR, and asking for the PR is their request for it. So claude-security's start confirmation ("This scan may take a while… Are you sure you want to continue?") is already answered "Yes": never ask it. An unanswered confirmation stops the scan and leaves the PR stuck.
+
    Let it run to the end; it reports when the report is written.
 3. Find the newest `CLAUDE-SECURITY-*` directory at the repository root. This is REPORT.
 4. Read REPORT's `CLAUDE-SECURITY-RESULTS.jsonl`.

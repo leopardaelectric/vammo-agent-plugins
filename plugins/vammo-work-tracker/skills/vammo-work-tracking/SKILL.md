@@ -52,12 +52,32 @@ All existing host permissions, confirmations, transitions and completion rules r
 4. If the person named a key (for example `VAM-42`), use it. Otherwise, if the state file has a
    work item for the same objective, reuse it.
 5. Otherwise generate a `workIntentId` (`wi-` + UUID), **write it to the state file first**, then
-   call `ensure_work_item` with the objective, repository full name, branch and
-   `creationPolicy: CREATE_IF_NO_MATCH`.
+   call `ensure_work_item` with the objective, repository full name, branch,
+   `creationPolicy: CREATE_IF_NO_MATCH` and `proposedWork.completionPolicy` (next section). When
+   you tell the person you are creating the item, name the policy, and the reviewer for
+   `REVIEWED_DELIVERABLE`.
 6. On `needs_selection`, list the candidates and ask the person. Do not pick one yourself.
 7. Call `start_work_session` with the client values above. Save `sessionId`, `workItemId` and
    `workItemKey` in the state file.
-8. Link the code you are working on (next section).
+8. Link the code you are working on (see Linking code).
+
+## Completion policy
+
+The completion policy decides what moves the work to DONE. Choose it by what the work delivers,
+not by its type or repository. Always send it: without it, the tracker uses a default by type, and
+that default is `PRODUCTION` for every FEATURE, BUG and MAINTENANCE, also for CI or documentation
+work.
+
+| The work | Policy |
+| --- | --- |
+| Changes a service or app that is deployed to production | `PRODUCTION` |
+| Changes only CI, documentation, scripts or tooling, or is research, analysis, a plan or an operational task | `DELIVERABLE` |
+| Must be accepted by another person whom the person names | `REVIEWED_DELIVERABLE` |
+
+- If you cannot tell whether the change reaches production, ask the person. Do not choose
+  `DELIVERABLE` to avoid deployment verification.
+- Use `REVIEWED_DELIVERABLE` only with a named reviewer. Without a reviewer, the work cannot close.
+- Choose at creation. Later, only a person can move work away from `PRODUCTION`, with a reason.
 
 ## Linking code
 
@@ -98,11 +118,32 @@ PR creation or update, handoff.
 - Link commits and PRs with `link_code`, not `attach_evidence`. `attach_evidence` is for documents,
   test reports and other links.
 
+## When the work is finished
+
+When every pull request linked to the work item is merged or closed and the objective is met:
+
+1. Call `get_work_item` and read `availableActions` and the acceptance criteria.
+2. Propose the next step to the person. Act only after they agree, and only with an action that
+   `availableActions` lists:
+   - `DELIVERABLE`: `set_work_phase` with `complete_deliverable`, an outcome and the status of each
+     criterion (`MET`, `NOT_MET` or `WAIVED`). If a criterion is not covered by evidence, say so
+     and do not complete.
+   - `REVIEWED_DELIVERABLE`: `set_work_phase` with `request_review`, the reviewer the person names
+     and the outcome (`deliverable.outcomeMarkdown`). Never approve your own deliverable.
+   - `PRODUCTION`: if the delivery scope is not confirmed, propose it. Deployment evidence then
+     moves the work to DONE.
+   - A BUG you close also needs its cause (`defectCause`) unless one is already recorded. Ask the
+     person; never invent it.
+
+To review all of a person's open work items, use **vammo-work-review**. It is included in this
+plugin.
+
 ## Before ending
 
-Call `link_code` once more, then `finish_work_session` with the outcome and a handoff: what
-changed, what is pending, and what the next person should check. Do not move work to DONE for
-production changes; deployment evidence does that.
+Call `link_code` once more, check [When the work is finished](#when-the-work-is-finished), then
+call `finish_work_session` with the outcome and a handoff: what changed, what is pending, and what
+the next person should check. Do not move work to DONE for production changes; deployment evidence
+does that.
 
 ## If the tracker is unavailable
 

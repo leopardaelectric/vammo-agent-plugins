@@ -8,8 +8,14 @@
     {
       "name": "vammo-work-tracker",
       "source": "./plugins/vammo-work-tracker",
-      "description": "Vammo Work Tracker MCP server, work-tracking and writing skills, and a scoped session-start reminder.",
-      "version": "1.3.1"
+      "description": "Vammo Work Tracker MCP server, work-tracking, work-review and writing skills, and a scoped session-start reminder.",
+      "version": "1.4.0"
+    },
+    {
+      "name": "vammo-apps",
+      "source": "./plugins/vammo-apps",
+      "description": "Vammo Apps: build internal apps by chatting with Claude (remote MCP with Vammo sign-in plus the vammo-apps skill).",
+      "version": "1.2.0"
     },
     {
       "name": "vammo-claude-skills",
@@ -24,7 +30,7 @@
       "name": "vammo-security",
       "source": "./plugins/vammo-security",
       "description": "Security gates for Claude Code: TruffleHog secret checks before git push and PR, plus a claude-security scan of the branch with verified fixes before the PR is opened.",
-      "version": "0.4.0",
+      "version": "0.3.2",
       "dependencies": [
         {
           "name": "claude-security",
