@@ -103,7 +103,8 @@ test('preview includes all item content, gates and correctly directed edges with
     { type: 'PARENT_OF', fromId: 'fleet-health', toId: 'repair-alerts' },
     { type: 'DEPENDS_ON', fromId: 'repair-alerts', toId: 'inspect-health' },
   ]);
-  assert.deepEqual(preview.mutationOperations, []);
+  assert.equal(Object.hasOwn(preview, 'operations'), false);
+  assert.equal(Object.hasOwn(preview, 'mutationOperations'), false);
   assert.equal(typeof preview.digest, 'string');
 });
 
@@ -160,6 +161,24 @@ test('work intent identity survives wording, revision and input-order changes', 
     await api.deriveWorkIntentId(original.sourceId, 'inspect-health'),
     await api.deriveWorkIntentId('synthetic:roadmap:other', 'inspect-health'),
   );
+});
+
+test('a null manifest workIntentId is treated as absent and derives from source identity', async () => {
+  const api = await loadHelper();
+  const source = manifest();
+  const item = source.items.find((candidate) => candidate.id === 'inspect-health');
+  item.workIntentId = null;
+
+  assert.equal(api.validateManifest(source), true);
+  const preview = api.buildPreview({ manifest: source, reconciliation: reconciliation() });
+  assert.equal(
+    preview.items.find((candidate) => candidate.id === 'inspect-health').workIntentId,
+    await api.deriveWorkIntentId(source.sourceId, 'inspect-health'),
+  );
+
+  const conflicting = structuredClone(source);
+  conflicting.items.find((candidate) => candidate.id === 'inspect-health').workIntentId = 'wi-conflicting-identity';
+  assert.throws(() => api.validateManifest(conflicting), /source identity/i);
 });
 
 test('dependency order places the epic first and each prerequisite before its dependent', async () => {
@@ -315,6 +334,148 @@ test('manual adoption still blocks title, type or criterion text mismatches', as
   }
 });
 
+test('manual criterion fidelity removes only checkbox-container indentation', async () => {
+  const api = await loadHelper();
+  const source = manifest();
+  const item = source.items.find((candidate) => candidate.id === 'repair-alerts');
+  item.existingKey = 'VAM-919';
+  item.acceptanceCriteria = ['Criterion with `literal --flag`.\n  - bullet `first`\n    - deeper `second`'];
+  const live = {
+    key: 'VAM-919',
+    workIntentId: null,
+    parentKey: 'VAM-900',
+    title: item.title,
+    type: item.type,
+    completionPolicy: item.completionPolicy,
+    reviewerId: item.reviewerId,
+    acceptanceCriteriaCount: 1,
+    acceptanceCriteria: [{ text: 'Criterion with `literal --flag`.\n- bullet `first`\n  - deeper `second`', status: 'TODO' }],
+  };
+  const snapshot = reconciliation([
+    await itemSnapshot(api, source, 'fleet-health', 'VAM-900', 1),
+    await itemSnapshot(api, source, 'inspect-health', 'VAM-901', 2, 'VAM-900'),
+    live,
+  ], [
+    { type: 'PARENT_OF', fromKey: 'VAM-900', toKey: 'VAM-901' },
+    { type: 'PARENT_OF', fromKey: 'VAM-900', toKey: 'VAM-919' },
+    { type: 'DEPENDS_ON', fromKey: 'VAM-919', toKey: 'VAM-901' },
+  ]);
+
+  const preview = api.buildPreview({ manifest: source, reconciliation: snapshot });
+  const plan = api.planApprovedOperations({ manifest: source, reconciliation: snapshot, approvalDigest: preview.digest });
+  assert.deepEqual(preview.blockers, []);
+  assert.equal(preview.items.find((candidate) => candidate.id === 'repair-alerts').decision, 'reuse');
+  assert.deepEqual(preview.items.find((candidate) => candidate.id === 'repair-alerts').acceptanceCriteria, item.acceptanceCriteria);
+  assert.equal(plan.status, 'approved');
+  assert.deepEqual(plan.operations, []);
+
+  live.acceptanceCriteria[0].text = 'Criterion with `literal --flag`.\n- bullet has different content\n  - deeper `second`';
+  const mismatched = api.buildPreview({ manifest: source, reconciliation: snapshot });
+  assert.ok(mismatched.blockers.some((blocker) => /criterion text mismatch|source content/i.test(blocker)));
+  const refused = api.planApprovedOperations({ manifest: source, reconciliation: snapshot, approvalDigest: mismatched.digest });
+  assert.equal(refused.status, 'refused');
+  assert.deepEqual(refused.operations, []);
+});
+
+test('a same-title/type live candidate is shown without adoption and blocks mutation until confirmation', async () => {
+  const api = await loadHelper();
+  const source = manifest();
+  const item = source.items.find((candidate) => candidate.id === 'repair-alerts');
+  const snapshot = reconciliation([
+    await itemSnapshot(api, source, 'fleet-health', 'VAM-900', 1),
+    await itemSnapshot(api, source, 'inspect-health', 'VAM-901', 2, 'VAM-900'),
+    {
+      key: 'VAM-919',
+      workIntentId: null,
+      parentKey: 'VAM-900',
+      title: item.title,
+      type: item.type,
+      acceptanceCriteriaCount: item.acceptanceCriteria.length,
+      acceptanceCriteria: item.acceptanceCriteria.map((text) => ({ text, status: 'TODO' })),
+    },
+  ]);
+  const preview = api.buildPreview({ manifest: source, reconciliation: snapshot });
+  const candidate = preview.items.find((entry) => entry.id === 'repair-alerts');
+  const plan = api.planApprovedOperations({ manifest: source, reconciliation: snapshot, approvalDigest: preview.digest });
+
+  assert.deepEqual(candidate.candidateKeys, ['VAM-919']);
+  assert.equal(candidate.resolvedKey, null);
+  assert.equal(candidate.decision, 'create');
+  assert.ok(preview.blockers.some((blocker) => blocker.includes('VAM-919')));
+  assert.equal(plan.status, 'refused');
+  assert.deepEqual(plan.operations, []);
+});
+
+test('multiple same-title/type candidates remain ambiguous and all keys appear in the blocker', async () => {
+  const api = await loadHelper();
+  const source = manifest();
+  const item = source.items.find((candidate) => candidate.id === 'repair-alerts');
+  const manualCandidate = (key) => ({
+    key,
+    workIntentId: null,
+    parentKey: 'VAM-900',
+    title: item.title,
+    type: item.type,
+    acceptanceCriteriaCount: item.acceptanceCriteria.length,
+    acceptanceCriteria: item.acceptanceCriteria.map((text) => ({ text, status: 'TODO' })),
+  });
+  const snapshot = reconciliation([
+    await itemSnapshot(api, source, 'fleet-health', 'VAM-900', 1),
+    await itemSnapshot(api, source, 'inspect-health', 'VAM-901', 2, 'VAM-900'),
+    manualCandidate('VAM-919'),
+    manualCandidate('VAM-920'),
+  ]);
+  const preview = api.buildPreview({ manifest: source, reconciliation: snapshot });
+  const candidate = preview.items.find((entry) => entry.id === 'repair-alerts');
+  const plan = api.planApprovedOperations({ manifest: source, reconciliation: snapshot, approvalDigest: preview.digest });
+
+  assert.deepEqual(candidate.candidateKeys, ['VAM-919', 'VAM-920']);
+  assert.equal(candidate.resolvedKey, null);
+  assert.equal(candidate.decision, 'create');
+  assert.ok(preview.blockers.some((blocker) => blocker.includes('VAM-919') && blocker.includes('VAM-920')));
+  assert.equal(plan.status, 'refused');
+  assert.deepEqual(plan.operations, []);
+});
+
+test('explicit existingKey confirmation can reuse a displayed same-title/type candidate', async () => {
+  const api = await loadHelper();
+  const source = manifest();
+  const item = source.items.find((candidate) => candidate.id === 'repair-alerts');
+  item.existingKey = 'VAM-919';
+  const snapshot = reconciliation([
+    await itemSnapshot(api, source, 'fleet-health', 'VAM-900', 1),
+    await itemSnapshot(api, source, 'inspect-health', 'VAM-901', 2, 'VAM-900'),
+    {
+      key: 'VAM-919',
+      workIntentId: null,
+      parentKey: 'VAM-900',
+      title: item.title,
+      type: item.type,
+      acceptanceCriteriaCount: item.acceptanceCriteria.length,
+      acceptanceCriteria: item.acceptanceCriteria.map((text) => ({ text, status: 'TODO' })),
+    },
+  ], [
+    { type: 'PARENT_OF', fromKey: 'VAM-900', toKey: 'VAM-901' },
+    { type: 'DEPENDS_ON', fromKey: 'VAM-919', toKey: 'VAM-901' },
+  ]);
+  const preview = api.buildPreview({ manifest: source, reconciliation: snapshot });
+  const unapproved = api.planApprovedOperations({ manifest: source, reconciliation: snapshot, approvalDigest: 'stale-digest' });
+  const plan = api.planApprovedOperations({ manifest: source, reconciliation: snapshot, approvalDigest: preview.digest });
+
+  assert.equal(preview.items.find((entry) => entry.id === 'repair-alerts').resolvedKey, 'VAM-919');
+  assert.equal(preview.items.find((entry) => entry.id === 'repair-alerts').decision, 'reuse');
+  assert.deepEqual(preview.blockers, []);
+  assert.equal(unapproved.status, 'refused');
+  assert.deepEqual(unapproved.operations, []);
+  assert.equal(plan.status, 'approved');
+  assert.deepEqual(plan.operations, [{
+    type: 'CREATE_RELATION',
+    relation: 'PARENT_OF',
+    fromKey: 'VAM-900',
+    toKey: 'VAM-919',
+  }]);
+});
+
 test('adopted reviewed work without a reviewer preserves policy and plans zero writes', async () => {
   const api = await loadHelper();
   const source = manifest();
@@ -382,6 +543,50 @@ test('draft preview keeps source items visible while source identity, team and r
   assert.deepEqual(plan.operations, []);
   assert.deepEqual(source, sourceBefore);
   assert.deepEqual(snapshot, snapshotBefore);
+});
+
+test('draft preview remains renderable when destination is absent or null', async () => {
+  const api = await loadHelper();
+  const cases = [
+    ['absent', () => {
+      const source = manifest();
+      delete source.destination;
+      return source;
+    }],
+    ['null', () => {
+      const source = manifest();
+      source.destination = null;
+      return source;
+    }],
+  ].map(([name, makeManifest]) => [name, makeManifest()]);
+  const snapshot = reconciliation([], [], 'complete');
+  const previews = [];
+  const errors = [];
+
+  for (const [name, source] of cases) {
+    try {
+      previews.push({ name, source, preview: api.buildPreview({ manifest: source, reconciliation: snapshot }) });
+    } catch (error) {
+      errors.push(`${name}: ${error.message}`);
+    }
+  }
+
+  assert.deepEqual(errors, [], 'both pending destination shapes must produce a preview');
+  for (const { name, source, preview } of previews) {
+    const pendingFields = preview.pendingMetadata.map((entry) => entry.field);
+    assert.equal(preview.readbackStatus, 'complete', name);
+    assert.equal(preview.items.length, source.items.length, name);
+    assert.ok(preview.items.every((item) => item.workIntentId !== null), name);
+    assert.ok(pendingFields.includes('destination.projectId'), name);
+    assert.ok(pendingFields.includes('destination.responsibility'), name);
+    assert.ok(preview.blockers.some((blocker) => blocker.includes('destination.projectId')), name);
+    assert.ok(preview.blockers.some((blocker) => blocker.includes('destination.responsibility')), name);
+    assert.throws(() => api.validateManifest(source), /destination\.projectId/i, name);
+
+    const plan = api.planApprovedOperations({ manifest: source, reconciliation: snapshot, approvalDigest: preview.digest });
+    assert.equal(plan.status, 'refused', name);
+    assert.deepEqual(plan.operations, [], name);
+  }
 });
 
 test('approval digest becomes stale after content, destination, gate or resolved mapping changes', async () => {
@@ -490,6 +695,12 @@ test('empty snapshot plan carries ensure fields and orders the epic and prerequi
 
   assert.deepEqual(creates.map((operation) => operation.localId), ['fleet-health', 'inspect-health', 'repair-alerts']);
   assert.equal(creates[0].workIntentId, await api.deriveWorkIntentId(source.sourceId, 'fleet-health'));
+  assert.equal(creates[0].objective, source.items.find((item) => item.id === 'fleet-health').title);
+  assert.equal(creates.every((operation) => /^req-vammo-roadmap-[a-f0-9]{64}$/.test(operation.requestId)), true);
+  assert.deepEqual(
+    creates.map((operation) => operation.requestId),
+    preview.items.filter((item) => item.decision === 'create').map((item) => item.creationRequestId),
+  );
   assert.equal(creates[0].proposedWork.title, 'Improve fleet battery health handling');
   assert.equal(creates[0].proposedWork.descriptionMarkdown, source.items.find((item) => item.id === 'fleet-health').descriptionMarkdown);
   assert.deepEqual(creates[0].proposedWork.acceptanceCriteria, [{ text: 'The child work is grouped under this epic.' }]);
@@ -498,6 +709,44 @@ test('empty snapshot plan carries ensure fields and orders the epic and prerequi
   assert.equal(creates[0].proposedWork.completionPolicy, 'DELIVERABLE');
   assert.equal(creates[2].reviewerId, 'reviewer-synthetic');
   assert.equal(creates.every((operation) => operation.creationPolicy === 'CREATE_IF_NO_MATCH'), true);
+
+  const repeated = api.planApprovedOperations({ manifest: source, reconciliation: snapshot, approvalDigest: preview.digest });
+  assert.deepEqual(
+    repeated.operations.filter((operation) => operation.type === 'CREATE_ITEM').map((operation) => operation.requestId),
+    creates.map((operation) => operation.requestId),
+  );
+
+  const persisted = structuredClone(source);
+  for (const operation of creates) {
+    persisted.items.find((item) => item.id === operation.localId).creationRequestId = operation.requestId;
+  }
+  const persistedPreview = api.buildPreview({ manifest: persisted, reconciliation: snapshot });
+  assert.equal(persistedPreview.digest, preview.digest);
+  const retried = api.planApprovedOperations({ manifest: persisted, reconciliation: snapshot, approvalDigest: persistedPreview.digest });
+  assert.deepEqual(
+    retried.operations.filter((operation) => operation.type === 'CREATE_ITEM').map((operation) => operation.requestId),
+    creates.map((operation) => operation.requestId),
+  );
+});
+
+test('a persisted creationRequestId cannot be reused after the create operation changes', async () => {
+  const api = await loadHelper();
+  const source = manifest();
+  const snapshot = reconciliation();
+  const firstPreview = api.buildPreview({ manifest: source, reconciliation: snapshot });
+  const firstPlan = api.planApprovedOperations({ manifest: source, reconciliation: snapshot, approvalDigest: firstPreview.digest });
+  const firstCreate = firstPlan.operations.find((operation) => operation.type === 'CREATE_ITEM' && operation.localId === 'inspect-health');
+  source.items.find((item) => item.id === 'inspect-health').creationRequestId = firstCreate.requestId;
+  source.items.find((item) => item.id === 'inspect-health').descriptionMarkdown += '\nChanged proposal.';
+
+  const changedPreview = api.buildPreview({ manifest: source, reconciliation: snapshot });
+  const changedItem = changedPreview.items.find((item) => item.id === 'inspect-health');
+  const changedPlan = api.planApprovedOperations({ manifest: source, reconciliation: snapshot, approvalDigest: changedPreview.digest });
+
+  assert.notEqual(changedItem.creationRequestId, firstCreate.requestId);
+  assert.ok(changedPreview.blockers.some((blocker) => /creationRequestId.*different create operation/i.test(blocker)));
+  assert.equal(changedPlan.status, 'refused');
+  assert.deepEqual(changedPlan.operations, []);
 });
 
 test('CLI renders a synthetic preview and approved plan without importing tools', (t) => {
@@ -512,7 +761,8 @@ test('CLI renders a synthetic preview and approved plan without importing tools'
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
   assert.equal(output.sourceId, 'synthetic:roadmap:fleet-health');
-  assert.deepEqual(output.mutationOperations, []);
+  assert.equal(Object.hasOwn(output, 'operations'), false);
+  assert.equal(Object.hasOwn(output, 'mutationOperations'), false);
 
   const planned = spawnSync(process.execPath, [helperPath, 'plan', '--manifest', manifestPath, '--snapshot', snapshotPath, '--approved-digest', output.digest], { encoding: 'utf8', cwd: root });
   assert.equal(planned.status, 0, planned.stderr);
@@ -539,6 +789,16 @@ test('skill and helper exist in the Work Tracker plugin package', () => {
   assert.match(skill, /reviewerless explicitly adopted item may be reused only/i);
   assert.match(skill, /never change the policy or downgrade it/i);
   assert.match(skill, /publication remains blocked/i);
+  assert.match(skill, /"creationRequestId": null/);
+  assert.match(skill, /Treat `workIntentId: null` as absent/);
+  assert.match(skill, /candidateKeys/);
+  assert.match(skill, /objective[\s\S]*source\s+item title/i);
+  assert.match(skill, /Save the operation's `requestId` in that item's `creationRequestId` manifest field before the MCP call\./);
+  assert.match(skill, /Persist the response key as\s+that manifest item's `resolvedKey` before the next call\./);
+  assert.match(skill, /Candidate confirmation only resolves that item; it does not approve other item or relation\s+writes\./);
+  assert.match(skill, /remove only the checkbox-container indentation from source and live criterion text/);
+  assert.match(skill, /replace it\s+with the ID shown in the current preview and rebuild the preview/);
+  assert.equal((skill.match(/ROADMAP_SKILL_FILE=/g) ?? []).length, 1);
 
   const readme = readFileSync(new URL('../../../README.md', import.meta.url), 'utf8');
   assert.match(readme, /`\/vammo-work-tracker:vammo-roadmap-to-tickets`/);

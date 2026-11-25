@@ -79,7 +79,6 @@ export function validateManifest(manifest, { allowPendingMetadata = false, revie
     if (!['team', 'personal'].includes(responsibility.kind) && !allowPendingMetadata) throw new TypeError('responsibility kind must be team or personal');
   }
   if (!Array.isArray(manifest.items) || manifest.items.length === 0) throw new TypeError('items must be a nonempty array');
-  if (manifest.items.filter((item) => item?.type === 'EPIC').length !== 1) throw new TypeError('manifest must contain exactly one EPIC');
 
   const ids = new Set();
   const explicitKeys = new Map();
@@ -89,8 +88,8 @@ export function validateManifest(manifest, { allowPendingMetadata = false, revie
     if (ids.has(item.id)) throw new TypeError(`duplicate source-local id: ${item.id}`);
     ids.add(item.id);
     const derivedIntent = hasSourceId ? deriveWorkIntentId(manifest.sourceId, item.id) : null;
-    if (item.workIntentId !== undefined && hasSourceId && item.workIntentId !== derivedIntent) throw new TypeError(`item ${item.id} has a workIntentId that does not match its source identity`);
-    if (item.workIntentId !== undefined && !hasSourceId && item.workIntentId !== null && !nonempty(item.workIntentId)) throw new TypeError(`item ${item.id} has an invalid persisted workIntentId`);
+    if (item.workIntentId !== undefined && item.workIntentId !== null && hasSourceId && item.workIntentId !== derivedIntent) throw new TypeError(`item ${item.id} has a workIntentId that does not match its source identity`);
+    if (item.workIntentId !== undefined && item.workIntentId !== null && !hasSourceId && !nonempty(item.workIntentId)) throw new TypeError(`item ${item.id} has an invalid persisted workIntentId`);
     if (!nonempty(item.title)) throw new TypeError(`item ${item.id} needs a title`);
     if (!WORK_ITEM_TYPES.has(item.type)) throw new TypeError(`item ${item.id} has an unsupported type`);
     if (!nonempty(item.descriptionMarkdown)) throw new TypeError(`item ${item.id} needs descriptionMarkdown`);
@@ -101,6 +100,7 @@ export function validateManifest(manifest, { allowPendingMetadata = false, revie
     if (item.completionPolicy === 'REVIEWED_DELIVERABLE' && !nonempty(item.reviewerId) && !allowPendingMetadata && !reviewerlessExistingIds.has(item.id)) throw new TypeError(`item ${item.id} needs a named reviewer`);
     if (item.originalLocale !== undefined && !nonempty(item.originalLocale)) throw new TypeError(`item ${item.id} has an invalid originalLocale`);
     if (item.priority !== undefined && !['URGENT', 'HIGH', 'NORMAL', 'LOW'].includes(item.priority)) throw new TypeError(`item ${item.id} has an invalid priority`);
+    if (item.creationRequestId !== undefined && item.creationRequestId !== null && !nonempty(item.creationRequestId)) throw new TypeError(`item ${item.id} has an invalid creationRequestId`);
     for (const field of ['existingKey', 'resolvedKey']) {
       const key = item[field];
       if (key !== undefined && key !== null && !nonempty(key)) throw new TypeError(`item ${item.id} has an invalid ${field}`);
@@ -130,9 +130,8 @@ export function validateManifest(manifest, { allowPendingMetadata = false, revie
     }
   }
 
+  topologicalOrder(manifest);
   const epic = manifest.items.find((item) => item.type === 'EPIC');
-  const epics = manifest.items.filter((item) => item.type === 'EPIC');
-  if (epics.length !== 1) throw new TypeError('manifest must contain exactly one EPIC');
   for (const item of manifest.items) {
     for (const prerequisite of item.dependsOn) {
       if (!ids.has(prerequisite)) throw new TypeError(`item ${item.id} depends on unknown item ${prerequisite}`);
@@ -140,7 +139,6 @@ export function validateManifest(manifest, { allowPendingMetadata = false, revie
       if (prerequisite === epic.id) throw new TypeError('children cannot use the EPIC as a blocking prerequisite');
     }
   }
-  topologicalOrder(manifest);
   return true;
 }
 
@@ -155,8 +153,23 @@ function criteriaCount(item) {
   return null;
 }
 
-function sameArray(left, right) {
-  return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, index) => value === right[index]);
+function normalizeCriterionText(value) {
+  if (typeof value !== 'string') return value;
+  const lines = value.split('\n');
+  const firstContinuation = lines.slice(1).find((line) => line.trim().length > 0);
+  const listMarker = firstContinuation?.match(/^( +)(?:[-*+]\s+|\d+[.)]\s+)/);
+  if (!listMarker) return value;
+  const containerIndent = listMarker[1].length;
+  return lines.map((line, index) => index > 0 && line.startsWith(' '.repeat(containerIndent))
+    ? line.slice(containerIndent)
+    : line).join('\n');
+}
+
+function sameCriteria(left, right) {
+  return Array.isArray(left)
+    && Array.isArray(right)
+    && left.length === right.length
+    && left.every((value, index) => normalizeCriterionText(value) === normalizeCriterionText(right[index]));
 }
 
 function analyzeSnapshot(manifest, snapshot, orderedIds) {
@@ -217,7 +230,16 @@ function analyzeSnapshot(manifest, snapshot, orderedIds) {
     }
     const selected = byExplicitKey ?? byIntent;
     if (!selected) {
-      resolved.set(id, { decision: complete && intent ? 'create' : 'unresolved', resolvedKey: null, workIntentId: intent });
+      const decision = complete && intent ? 'create' : 'unresolved';
+      const candidateKeys = decision === 'create'
+        ? [...new Set(items
+          .filter((live) => isRecord(live) && nonempty(live.key) && live.title === item.title && live.type === item.type)
+          .map((live) => live.key))].sort()
+        : [];
+      if (candidateKeys.length > 0) {
+        blockers.push(`item ${id} has same-title/type candidates ${candidateKeys.join(', ')}; confirm an existing key before reuse`);
+      }
+      resolved.set(id, { decision, resolvedKey: null, workIntentId: intent, candidateKeys });
       continue;
     }
     if (fixedKey !== null && selected.workIntentId !== null && selected.workIntentId !== undefined && selected.workIntentId !== intent) {
@@ -233,7 +255,7 @@ function analyzeSnapshot(manifest, snapshot, orderedIds) {
         resolved.set(id, { decision: 'conflict', resolvedKey: null, workIntentId: intent });
         continue;
       }
-      if (selected.title !== item.title || selected.type !== item.type || !sameArray(criteria, item.acceptanceCriteria)) {
+      if (selected.title !== item.title || selected.type !== item.type || !sameCriteria(criteria, item.acceptanceCriteria)) {
         blockers.push(`manual item ${selected.key} does not match source content for item ${id}`);
         resolved.set(id, { decision: 'conflict', resolvedKey: null, workIntentId: intent });
         continue;
@@ -251,7 +273,7 @@ function analyzeSnapshot(manifest, snapshot, orderedIds) {
       if (selected[field] !== undefined && selected[field] !== item[field]) blockers.push(`${field} mismatch for live item ${selected.key}`);
     }
     const observedCriteria = criteriaText(selected);
-    if (observedCriteria !== null && !sameArray(observedCriteria, item.acceptanceCriteria)) blockers.push(`acceptance-criteria text mismatch for live item ${selected.key}`);
+    if (observedCriteria !== null && !sameCriteria(observedCriteria, item.acceptanceCriteria)) blockers.push(`acceptance-criteria text mismatch for live item ${selected.key}`);
     resolved.set(id, { decision: 'reuse', resolvedKey: selected.key, workIntentId: intent });
   }
 
@@ -350,6 +372,7 @@ export function buildPreview({ manifest, reconciliation }) {
       existingKey: item.existingKey ?? null,
       persistedResolvedKey: item.resolvedKey ?? null,
       resolvedKey: resolution.resolvedKey,
+      candidateKeys: resolution.candidateKeys ?? [],
       decision: resolution.decision,
       title: item.title,
       type: item.type,
@@ -357,6 +380,9 @@ export function buildPreview({ manifest, reconciliation }) {
       priority: item.priority ?? null,
       descriptionMarkdown: item.descriptionMarkdown,
       acceptanceCriteria: item.acceptanceCriteria,
+      creationRequestId: resolution.decision === 'create'
+        ? ensureOperation(item, manifest.destination, resolution.workIntentId).requestId
+        : null,
       lane: item.lane ?? null,
       dependsOn: item.dependsOn,
       completionPolicy: item.completionPolicy,
@@ -369,6 +395,15 @@ export function buildPreview({ manifest, reconciliation }) {
     };
   });
   const edges = expectedEdges(manifest, order);
+  const creationRequestIdBlockers = order.flatMap((id) => {
+    const item = byId.get(id);
+    const resolution = state.resolved.get(id);
+    if (resolution.decision !== 'create' || item.creationRequestId === undefined || item.creationRequestId === null) return [];
+    const expected = ensureOperation(item, manifest.destination, resolution.workIntentId).requestId;
+    return item.creationRequestId === expected
+      ? []
+      : [`item ${id} has a creationRequestId for a different create operation; save the current preview ID before planning`];
+  });
   const proposal = {
     sourceId: manifest.sourceId ?? null,
     revision: manifest.revision ?? null,
@@ -379,25 +414,24 @@ export function buildPreview({ manifest, reconciliation }) {
     edgeDecisions: edges.map((edge) => ({ ...edge, decision: liveRelationExists(edge, state) ? 'reuse' : 'create' })),
     topologicalOrder: order,
     pendingMetadata: metadata.pending,
-    blockers: [...new Set([...state.blockers, ...metadata.blockers])],
-    mutationOperations: [],
+    blockers: [...new Set([...state.blockers, ...metadata.blockers, ...creationRequestIdBlockers])],
   };
   return { ...proposal, digest: digest(proposal) };
 }
 
 function ensureOperation(item, destination, workIntentId) {
   const operation = {
-    type: 'CREATE_ITEM',
+    objective: item.title,
     localId: item.id,
     workIntentId,
     creationPolicy: 'CREATE_IF_NO_MATCH',
-    projectId: destination.projectId,
+    projectId: destination?.projectId ?? null,
     proposedWork: {
       title: item.title,
       type: item.type,
       descriptionMarkdown: item.descriptionMarkdown,
       acceptanceCriteria: item.acceptanceCriteria.map((text) => ({ text })),
-      responsibility: destination.responsibility,
+      responsibility: destination?.responsibility ?? null,
       completionPolicy: item.completionPolicy,
     },
     lane: item.lane ?? null,
@@ -406,7 +440,19 @@ function ensureOperation(item, destination, workIntentId) {
   };
   if (item.originalLocale) operation.proposedWork.originalLocale = item.originalLocale;
   if (item.priority) operation.proposedWork.priority = item.priority;
-  return operation;
+  const requestIdentity = {
+    localId: operation.localId,
+    objective: operation.objective,
+    workIntentId: operation.workIntentId,
+    creationPolicy: operation.creationPolicy,
+    projectId: operation.projectId,
+    proposedWork: operation.proposedWork,
+  };
+  return {
+    type: 'CREATE_ITEM',
+    ...operation,
+    requestId: `req-vammo-roadmap-${digest(requestIdentity)}`,
+  };
 }
 
 function relationOperation(edge, state) {
