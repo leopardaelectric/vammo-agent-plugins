@@ -6,10 +6,21 @@ Plugins that connect Claude Code, Codex and Claude chat to Vammo systems: the Va
 
 The plugin installs:
 - the remote MCP server of the [Vammo Work Tracker](https://work.vammo.com) (`https://services.vammo.com/ms-work-tracker/mcp`, Vammo sign-in);
+- the `vammo-roadmap-to-tickets` skill, which previews one epic and its child work items, then plans only explicitly approved missing items;
 - the `vammo-work-tracker-writing` skill for drafting and materially reviewing WorkItems and Requests, including business tasks and unsaved drafts;
 - the `vammo-work-tracking` skill, which tracks every coding task: work item, session, progress, and the branch, commits and pull requests behind it. It chooses the completion policy by what the work delivers and proposes the completing action when the work is finished;
 - the `vammo-work-review` skill, which reviews a person's open work items against their pull requests and applies only the changes the person approves. Its classifier needs Python 3;
 - in Claude Code and Codex, a session-start reminder so tracking happens without being asked, only in the folders you choose (see [Tracking only work folders](#tracking-only-work-folders)).
+
+### Turning a roadmap into Work Tracker items
+
+Invoke `/vammo-work-tracker:vammo-roadmap-to-tickets` in Claude Code or `$vammo-roadmap-to-tickets`
+in Codex. Node.js must be installed so the skill can run its bundled, read-only planner. It writes
+only after the person approves the complete displayed proposal and digest; passing a digest to the
+planner does not prove approval.
+
+The skill and helper install in the plugin cache. The skill resolves `roadmap.mjs` beside the
+loaded `SKILL.md`, so the target repository does not need a `plugins/...` path.
 
 ### Claude Code
 
